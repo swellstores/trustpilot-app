@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json.swell.store/setting.json",
+  "label": "Trustpilot",
+  "description": "Send Trustpilot review invitations to customers after their orders. Create an API application in Trustpilot Business → Integrations → Developers → APIs to get the API key and secret.",
+  "actions": [
+    {
+      "id": "test_connection",
+      "label": "Test connection",
+      "function": "test-connection",
+      "loading_label": "Testing…",
+      "hint": "Checks the API key and secret, and lists your invitation templates"
+    },
+    {
+      "id": "invite_past_orders",
+      "label": "Invite past orders",
+      "function": "invite-orders",
+      "loading_label": "Starting invitations…",
+      "hint": "Sends invitations for orders placed before the app was installed",
+      "modal": {
+        "title": "Invite past orders",
+        "description": "Sends a Trustpilot invitation right away for each order placed since this date that reached the \"Send invitation when\" step and wasn't invited yet. Runs in the background.",
+        "submit_label": "Send invitations",
+        "fields": [
+          {
+            "id": "since",
+            "label": "Orders placed since",
+            "type": "date",
+            "required": true,
+            "description": "Trustpilot accepts invitations for recent purchases. Keep this to the last few weeks."
+          }
+        ]
+      }
+    }
+  ],
+  "fields": [
+    {
+      "type": "field_row",
+      "fields": [
+        {
+          "id": "api_key",
+          "label": "API key",
+          "type": "secret",
+          "required": true,
+          "admin_span": 2,
+          "description": "Trustpilot Business → Integrations → Developers → APIs"
+        },
+        {
+          "id": "api_secret",
+          "label": "API secret",
+          "type": "secret",
+          "required": true,
+          "admin_span": 2,
+          "description": "Shown next to the API key"
+        }
+      ]
+    },
+    {
+      "id": "business_unit_id",
+      "label": "Business unit ID",
+      "type": "short_text",
+      "required": true,
+      "description": "Your Trustpilot business profile ID. Leave empty and run Test connection to look it up by your store's domain."
+    },
+    {
+      "id": "enabled",
+      "label": "Enabled",
+      "type": "boolean",
+      "ui": "toggle",
+      "default": true,
+      "description": "Turns off all invitations without uninstalling the app"
+    },
+    {
+      "type": "field_group",
+      "label": "Invitations",
+      "description": "Customers get a Trustpilot email inviting them to review your store.",
+      "fields": [
+        {
+          "type": "field_row",
+          "fields": [
+            {
+              "id": "invite_on",
+              "label": "Send invitation when",
+              "type": "select",
+              "default": "delivered",
+              "admin_span": 2,
+              "options": [
+                { "label": "Order is fulfilled", "value": "delivered" },
+                { "label": "Order is paid", "value": "paid" },
+                { "label": "Order is placed", "value": "submitted" }
+              ]
+            },
+            {
+              "id": "delay_days",
+              "label": "Days to wait",
+              "type": "number",
+              "default": 3,
+              "min": 0,
+              "max": 90,
+              "admin_span": 2,
+              "description": "Trustpilot sends the email this many days later. 0 sends it right away."
+            }
+          ]
+        },
+        {
+          "type": "field_row",
+          "fields": [
+            {
+              "id": "sender_name",
+              "label": "Sender name",
+              "type": "short_text",
+              "admin_span": 2,
+              "description": "Shown as the sender of the email. Empty: your Trustpilot business name."
+            },
+            {
+              "id": "reply_to",
+              "label": "Reply-to email",
+              "type": "email",
+              "admin_span": 2,
+              "description": "Where customer replies go. Empty: Trustpilot's default."
+            }
+          ]
+        },
+        {
+          "type": "field_row",
+          "fields": [
+            {
+              "id": "locale",
+              "label": "Language",
+              "type": "short_text",
+              "default": "en-US",
+              "admin_span": 2,
+              "description": "Locale of the email and review page, e.g. en-US, en-GB, de-DE"
+            },
+            {
+              "id": "service_template_id",
+              "label": "Template ID",
+              "type": "short_text",
+              "admin_span": 2,
+              "description": "Empty: your default template. Test connection lists template IDs."
+            }
+          ]
+        },
+        {
+          "type": "field_row",
+          "fields": [
+            {
+              "id": "tags",
+              "label": "Tags",
+              "type": "short_text",
+              "admin_span": 2,
+              "description": "Comma-separated tags added to reviews, e.g. swell, webshop"
+            },
+            {
+              "id": "redirect_uri",
+              "label": "Redirect URL",
+              "type": "url",
+              "admin_span": 2,
+              "description": "Page customers see after writing their review. Empty: Trustpilot's page."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "field_group",
+      "label": "Product reviews",
+      "description": "Also ask customers to review the products they bought. Requires Trustpilot product reviews on your plan.",
+      "fields": [
+        {
+          "id": "product_reviews",
+          "label": "Invite to product reviews",
+          "type": "boolean",
+          "ui": "toggle",
+          "default": false,
+          "description": "Items with a SKU are added to the invitation"
+        },
+        {
+          "type": "field_row",
+          "fields": [
+            {
+              "id": "product_template_id",
+              "label": "Product template ID",
+              "type": "short_text",
+              "admin_span": 2,
+              "description": "Empty: your default product review template"
+            },
+            {
+              "id": "product_url",
+              "label": "Product page URL",
+              "type": "short_text",
+              "admin_span": 2,
+              "description": "Use {slug} or {id}, e.g. https://shop.example.com/products/{slug}. Empty: your store URL + /products/{slug}."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

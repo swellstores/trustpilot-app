@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json.swell.store/content.json",
+  "collection": "orders",
+  "description": "Trustpilot review invitation on orders",
+  "fields": [
+    {
+      "id": "trustpilot_status",
+      "label": "Invitation",
+      "type": "select",
+      "readonly": true,
+      "options": [
+        { "label": "Sent", "value": "sent" },
+        { "label": "Failed", "value": "failed" }
+      ]
+    },
+    {
+      "id": "trustpilot_sent_at",
+      "label": "Sent to Trustpilot",
+      "type": "datetime",
+      "readonly": true
+    },
+    {
+      "id": "trustpilot_send_time",
+      "label": "Email goes out",
+      "type": "datetime",
+      "readonly": true
+    },
+    {
+      "id": "trustpilot_error",
+      "label": "Error",
+      "type": "long_text",
+      "readonly": true
+    }
+  ],
+  "views": [
+    {
+      "id": "list",
+      "fields": [
+        {
+          "id": "trustpilot_status",
+          "label": "Trustpilot"
+        }
+      ],
+      "bulk_actions": [
+        {
+          "id": "invite_selected",
+          "label": "Send Trustpilot invitations",
+          "function": "invite-orders",
+          "loading_label": "Starting invitations…",
+          "modal": {
+            "title": "Send Trustpilot invitations",
+            "description": "Sends an invitation right away for each selected order that wasn't invited yet. Canceled orders and orders without a customer email are skipped. Runs in the background."
+          }
+        }
+      ]
+    },
+    {
+      "id": "edit",
+      "extra_actions": [
+        {
+          "id": "send_invitation",
+          "label": "Send Trustpilot invitation",
+          "function": "send-invitation",
+          "loading_label": "Sending invitation…",
+          "hint": "Sends a review invitation for this order right away",
+          "modal": {
+            "title": "Send Trustpilot invitation",
+            "description": "Trustpilot emails the customer right away, without the delay set in the app settings.",
+            "submit_label": "Send",
+            "fields": [
+              {
+                "id": "send_again",
+                "label": "Send again if this order was already invited",
+                "type": "boolean",
+                "ui": "checkbox",
+                "default": false
+              }
+            ]
+          }
+        }
+      ],
+      "tabs": [
+        {
+          "id": "trustpilot",
+          "label": "Trustpilot",
+          "fields": [
+            {
+              "type": "field_row",
+              "fields": [
+                { "id": "trustpilot_status", "admin_span": 1 },
+                { "id": "trustpilot_sent_at", "admin_span": 1 },
+                { "id": "trustpilot_send_time", "admin_span": 2 }
+              ]
+            },
+            {
+              "id": "trustpilot_error"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

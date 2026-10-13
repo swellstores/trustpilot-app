@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.swell.store/model.json",
+  "collection": "orders",
+  "description": "Trustpilot review invitation stored on orders",
+  "fields": {
+    "trustpilot_status": {
+      "type": "string",
+      "enum": ["sent", "failed"],
+      "description": "Trustpilot invitation status: sent, or failed when Trustpilot rejected it"
+    },
+    "trustpilot_sent_at": {
+      "type": "date",
+      "description": "When the invitation was handed to Trustpilot"
+    },
+    "trustpilot_send_time": {
+      "type": "date",
+      "description": "When Trustpilot sends the email to the customer"
+    },
+    "trustpilot_error": {
+      "type": "string",
+      "description": "Why Trustpilot rejected the last invitation"
+    }
+  }
+}
