@@ -54,7 +54,9 @@ describe("invite-orders workflow", () => {
     const { req, get } = makeReq([ids(1)], { ...rawSettings, enabled: false });
     const { step, names } = makeStep();
 
-    expect(await new InviteOrders().run(req, step)).toEqual({ error: "disabled" });
+    await expect(new InviteOrders().run(req, step)).rejects.toThrow(
+      "Invitations not sent: the Trustpilot app is turned off in its settings.",
+    );
     expect(names).toEqual(["load settings"]);
     expect(get).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -65,7 +67,9 @@ describe("invite-orders workflow", () => {
     const { req, get } = makeReq([ids(1)], { api_key: "k" });
     const { step } = makeStep();
 
-    expect(await new InviteOrders().run(req, step)).toEqual({ error: "missing_settings" });
+    await expect(new InviteOrders().run(req, step)).rejects.toThrow(
+      "Invitations not sent: add the API secret, Business unit ID in Apps → Trustpilot.",
+    );
     expect(get).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -81,7 +85,7 @@ describe("invite-orders workflow", () => {
 
     const totals = await new InviteOrders().run(req, step);
 
-    expect(totals).toEqual({ sent: PAGE_SIZE + 1, skipped: 0, failed: 0 });
+    expect(totals).toEqual({ sent: PAGE_SIZE + 1, skipped: 0, failed: 0, unconfirmed: 0 });
     expect(names).toEqual(["load settings", "page 1", "page 2"]);
     expect(get.mock.calls[0][1].$and).toEqual([
       { delivered: true },
@@ -101,7 +105,7 @@ describe("invite-orders workflow", () => {
     });
     const { step } = makeStep();
 
-    expect(await new InviteOrders().run(req, step)).toEqual({ sent: 1, skipped: 0, failed: 0 });
+    expect(await new InviteOrders().run(req, step)).toEqual({ sent: 1, skipped: 0, failed: 0, unconfirmed: 0 });
     expect(get.mock.calls[0][1].$and).toEqual([{ id: { $in: ["o000"] } }]);
   });
 
@@ -110,7 +114,7 @@ describe("invite-orders workflow", () => {
     const { req } = makeReq([]);
     const { step, names } = makeStep();
 
-    expect(await new InviteOrders().run(req, step)).toEqual({ sent: 0, skipped: 0, failed: 0 });
+    expect(await new InviteOrders().run(req, step)).toEqual({ sent: 0, skipped: 0, failed: 0, unconfirmed: 0 });
     expect(names).toEqual(["load settings", "page 1"]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -124,12 +128,42 @@ describe("invite-orders workflow", () => {
       .mockResolvedValue({ trustpilot: { ...rawSettings, enabled: false } });
     const { step, names } = makeStep();
 
-    const totals = await new InviteOrders().run(req, step);
-
-    expect(totals).toEqual({ sent: PAGE_SIZE, skipped: 0, failed: 0, error: "disabled" });
+    await expect(new InviteOrders().run(req, step)).rejects.toThrow(
+      `Invitations stopped: the app was turned off in its settings. Before stopping: sent ${PAGE_SIZE}, ` +
+        "skipped 0, failed 0, not confirmed 0.",
+    );
     expect(names).toEqual(["load settings", "page 1", "page 2"]);
     expect(get).toHaveBeenCalledTimes(1);
     expect(inviteCalls(fetchMock)).toHaveLength(PAGE_SIZE);
+  });
+
+  it("stops when credentials are removed during the run", async () => {
+    const fetchMock = mockTrustpilot();
+    const { req, get } = makeReq([ids(1)]);
+    (req.swell.settings as any)
+      .mockResolvedValueOnce({ trustpilot: rawSettings })
+      .mockResolvedValue({ trustpilot: { ...rawSettings, api_secret: "" } });
+    const { step } = makeStep();
+
+    await expect(new InviteOrders().run(req, step)).rejects.toThrow(
+      "Invitations stopped: the API secret was removed from the settings.",
+    );
+    expect(get).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps credentials out of step output", async () => {
+    mockTrustpilot();
+    const { req } = makeReq([ids(1)]);
+    const { step } = makeStep();
+
+    await new InviteOrders().run(req, step);
+
+    const outputs = await Promise.all((step.do as any).mock.results.map((r: any) => r.value));
+    expect(outputs[0]).toEqual({ enabled: true, missing: [], invite_on: "delivered" });
+    const json = JSON.stringify(outputs);
+    expect(json).not.toContain(rawSettings.api_key);
+    expect(json).not.toContain(rawSettings.api_secret);
   });
 
   it("retries pages with backoff", async () => {

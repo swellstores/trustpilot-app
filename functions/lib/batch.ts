@@ -12,10 +12,12 @@ export interface BatchStats {
   sent: number;
   skipped: number;
   failed: number;
+  // Trustpilot didn't answer; the invitation may or may not exist
+  unconfirmed: number;
 }
 
 export function emptyStats(): BatchStats {
-  return { sent: 0, skipped: 0, failed: 0 };
+  return { sent: 0, skipped: 0, failed: 0, unconfirmed: 0 };
 }
 
 export function addStats(total: BatchStats, page: BatchStats): BatchStats {
@@ -23,6 +25,7 @@ export function addStats(total: BatchStats, page: BatchStats): BatchStats {
     sent: total.sent + page.sent,
     skipped: total.skipped + page.skipped,
     failed: total.failed + page.failed,
+    unconfirmed: total.unconfirmed + page.unconfirmed,
   };
 }
 
@@ -69,7 +72,7 @@ export async function fetchOrders(
   return page?.results || [];
 }
 
-// invite a page of orders; retryable errors are rethrown so the workflow retries the page
+// invite a page of orders; a rate limit is rethrown so the workflow retries the page
 export async function invitePage(
   swell: SwellClient,
   orders: any[],
@@ -84,8 +87,8 @@ export async function invitePage(
       batch.map((order) => inviteOrder(swell, order, ctx, { delayDays: 0, appId })),
     );
     for (const result of results) {
-      // inviteOrder records Trustpilot rejections itself; what reaches here is retryable
-      // (Trustpilot rate limit or outage) or a failed Swell update, so retry the page
+      // inviteOrder records each result itself; what reaches here is a Trustpilot rate limit (nothing was created)
+      // or an error before any invitation was sent, so retry the page: invited orders are skipped on the retry
       if (result.status === 'rejected') {
         throw result.reason;
       }

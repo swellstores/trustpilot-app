@@ -117,11 +117,27 @@ describe("order-invitations", () => {
     expect(errorSpy).toHaveBeenCalledWith("Trustpilot: invitation for order ord_1 failed:", "Trustpilot 401: Unauthorized");
   });
 
-  it("throws retryable errors so Swell retries", async () => {
-    mockTrustpilot({ invite: { status: 503, body: { message: "down" } } });
+  it("throws a rate limit so Swell retries", async () => {
+    mockTrustpilot({ invite: { status: 429, body: { message: "slow down" } } });
+    const { req } = request({ id: "ord_1", $event: { type: "order.delivered" } });
+
+    await expect(orderInvitations(req)).rejects.toThrow("Trustpilot 429");
+  });
+
+  it("throws a token outage so Swell retries, before anything is sent", async () => {
+    const fetchMock = mockTrustpilot({ token: { status: 503, body: { message: "down" } } });
     const { req } = request({ id: "ord_1", $event: { type: "order.delivered" } });
 
     await expect(orderInvitations(req)).rejects.toThrow("Trustpilot 503");
+    expect(inviteCalls(fetchMock)).toHaveLength(0);
+  });
+
+  it("doesn't retry an invitation Trustpilot didn't confirm", async () => {
+    mockTrustpilot({ invite: { status: 503, body: { message: "down" } } });
+    const { req, swell } = request({ id: "ord_1", $event: { type: "order.delivered" } });
+
+    await expect(orderInvitations(req)).resolves.toBeUndefined();
+    expect(swell.put.mock.calls[0][1].$app.trustpilot.trustpilot_status).toBe("unconfirmed");
   });
 });
 
@@ -185,10 +201,24 @@ describe("test-connection", () => {
     expect((await testConnection(req)).message).toBe("Business unit bu_1 was not found in Trustpilot. Check the ID.");
   });
 
-  it("reports other failures", async () => {
+  it("reports other failures, with try again only for temporary ones", async () => {
     mockTrustpilot({ unit: { status: 500, body: { message: "boom" } } });
-    const { req } = request({}, null);
-    expect((await testConnection(req)).message).toBe("Trustpilot request failed: Trustpilot 500: boom");
+    expect((await testConnection(request({}, null).req)).message).toBe(
+      "Trustpilot request failed, try again later: Trustpilot 500: boom",
+    );
+
+    vi.restoreAllMocks();
+    mockTrustpilot({ templates: { status: 400, body: { message: "bad request" } } });
+    expect((await testConnection(request({}, null).req)).message).toBe(
+      "Trustpilot request failed: Trustpilot 400: bad request",
+    );
+  });
+
+  it("doesn't report a 404 from the templates as an unknown business unit", async () => {
+    mockTrustpilot({ templates: { status: 404, body: { message: "Not found" } } });
+    expect((await testConnection(request({}, null).req)).message).toBe(
+      "Trustpilot request failed: Trustpilot 404: Not found",
+    );
   });
 
   it("works while the app is disabled", async () => {
@@ -270,9 +300,30 @@ describe("send-invitation", () => {
 
     vi.restoreAllMocks();
     vi.spyOn(console, "log").mockImplementation(() => {});
-    mockTrustpilot({ invite: { status: 503, body: { message: "down" } } });
+    mockTrustpilot({ token: { status: 503, body: { message: "down" } } });
     expect((await sendInvitation(request(action()).req)).message).toBe(
       "Trustpilot request failed, try again later: Trustpilot 503: down",
+    );
+
+    vi.restoreAllMocks();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    mockTrustpilot({ token: { status: 400, body: { message: "invalid_request" } } });
+    expect((await sendInvitation(request(action()).req)).message).toBe(
+      "Trustpilot request failed: Trustpilot 400: invalid_request",
+    );
+  });
+
+  it("explains an invitation Trustpilot didn't confirm", async () => {
+    mockTrustpilot({ invite: { status: 503, body: { message: "down" } } });
+    expect((await sendInvitation(request(action()).req)).message).toBe(
+      "Trustpilot didn't confirm the invitation (Trustpilot 503: down). It may have been created: " +
+        "check Trustpilot Business → Invitations before sending again.",
+    );
+
+    const order = makeOrder({ $app: { trustpilot: { trustpilot_status: "unconfirmed" } } });
+    expect((await sendInvitation(request(action(), order).req)).message).toBe(
+      "Trustpilot didn't confirm the last invitation for this order. Check Trustpilot Business → Invitations, " +
+        'and tick "Send again" only if it isn\'t there.',
     );
   });
 });

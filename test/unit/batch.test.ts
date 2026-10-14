@@ -22,11 +22,14 @@ afterEach(() => {
 
 describe("emptyStats / addStats", () => {
   it("starts at zero and sums pages", () => {
-    expect(emptyStats()).toEqual({ sent: 0, skipped: 0, failed: 0 });
-    expect(addStats({ sent: 1, skipped: 2, failed: 3 }, { sent: 4, skipped: 5, failed: 6 })).toEqual({
+    expect(emptyStats()).toEqual({ sent: 0, skipped: 0, failed: 0, unconfirmed: 0 });
+    expect(
+      addStats({ sent: 1, skipped: 2, failed: 3, unconfirmed: 1 }, { sent: 4, skipped: 5, failed: 6, unconfirmed: 2 }),
+    ).toEqual({
       sent: 5,
       skipped: 7,
       failed: 9,
+      unconfirmed: 3,
     });
   });
 });
@@ -87,19 +90,24 @@ describe("fetchOrders", () => {
 });
 
 describe("invitePage", () => {
-  it("counts sent, skipped and failed orders without delay", async () => {
+  it("counts sent, skipped, failed and unconfirmed orders without delay", async () => {
     const fetchMock = mockTrustpilot({
-      invite: [{ status: 202, body: {} }, { status: 400, body: { message: "bad" } }],
+      invite: [{ status: 202, body: {} }, { status: 400, body: { message: "bad" } }, { status: 502, body: {} }],
     });
-    const orders = [makeOrder({ id: "a" }), makeOrder({ id: "b" }), makeOrder({ id: "c", canceled: true })];
+    const orders = [
+      makeOrder({ id: "a" }),
+      makeOrder({ id: "b" }),
+      makeOrder({ id: "d" }),
+      makeOrder({ id: "c", canceled: true }),
+    ];
 
     const stats = await invitePage(makeSwell(), orders, makeContext());
 
-    expect(stats).toEqual({ sent: 1, skipped: 1, failed: 1 });
+    expect(stats).toEqual({ sent: 1, skipped: 1, failed: 1, unconfirmed: 1 });
     expect(inviteCalls(fetchMock)[0].body.serviceReviewInvitation).not.toHaveProperty("preferredSendTime");
   });
 
-  it("rethrows retryable errors so the workflow retries the page", async () => {
+  it("rethrows a rate limit so the workflow retries the page", async () => {
     mockTrustpilot({ invite: { status: 429, body: { message: "slow down" } } });
     await expect(invitePage(makeSwell(), [makeOrder()], makeContext())).rejects.toThrow("Trustpilot 429");
   });

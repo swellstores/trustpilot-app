@@ -8,7 +8,7 @@ Ask every customer for a Trustpilot review after their order, automatically.
 2. **Your email, your template.** Choose the sender name, reply-to address, language, invitation template, tags and the page customers see after their review.
 3. **Product reviews (optional).** Ask customers to review the products they bought, matched by SKU, with product names, images and links.
 4. **Past and selected orders.** Invite recent orders placed before you installed the app, or select orders in the list and invite them in one go.
-5. **Status on every order.** Each order shows whether it was invited, when the email goes out, and any error. Send an invitation again from the order page.
+5. **Status on every order.** Each order shows whether it was invited, when the email goes out, and any error. Customers are never emailed twice by a retry. Send an invitation again from the order page.
 
 ## Setup
 

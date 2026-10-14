@@ -360,16 +360,31 @@ export function invitationStatus(order: any, appId = APP_ID): any {
   return order?.$app?.[appId] || {};
 }
 
+// sent, or unconfirmed: Trustpilot may have created it, so sending again could email the customer twice
 export function alreadyInvited(order: any, appId = APP_ID): boolean {
-  return invitationStatus(order, appId).trustpilot_status === 'sent';
+  const status = invitationStatus(order, appId).trustpilot_status;
+  return status === 'sent' || status === 'unconfirmed';
 }
 
 export interface InviteResult {
-  status: 'sent' | 'skipped' | 'failed';
+  status: 'sent' | 'skipped' | 'failed' | 'unconfirmed';
   reason?: string;
 }
 
-// send the invitation and record the result on the order; retryable errors are rethrown
+// save the invitation result on the order; a failed save is logged, not thrown, so the
+// invitation is never sent again just because the order couldn't be updated
+async function recordResult(swell: SwellClient, order: any, values: Record<string, any>, appId?: string) {
+  try {
+    await swell.put(`/orders/${order.id}`, appValues(values, appId));
+  } catch (err) {
+    console.error(
+      `Trustpilot: invitation result for order ${order.number || order.id} not saved (${values.trustpilot_status}):`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
+// send the invitation and record the result on the order; only a rate limit is rethrown for a retry
 export async function inviteOrder(
   swell: SwellClient,
   order: any,
@@ -398,24 +413,35 @@ export async function inviteOrder(
       body: JSON.stringify(payload),
     });
   } catch (err) {
-    if (err instanceof TrustpilotError && err.retryable) {
+    // a rate limit is rejected before the invitation is created, so it is safe to retry
+    if (err instanceof TrustpilotError && err.status === 429) {
       throw err;
     }
     const message = err instanceof Error ? err.message : String(err);
-    await swell.put(`/orders/${order.id}`, appValues({ trustpilot_status: 'failed', trustpilot_error: message }, options.appId));
+    // after a network error, timeout or 5xx Trustpilot may already have created the invitation:
+    // record it as unconfirmed and don't retry, so the customer isn't emailed twice
+    if (err instanceof TrustpilotError && err.retryable) {
+      const note = `${message}. Trustpilot may have created the invitation: check Trustpilot Business → Invitations before sending again.`;
+      await recordResult(swell, order, { trustpilot_status: 'unconfirmed', trustpilot_error: note }, options.appId);
+      console.error(`Trustpilot: invitation for order ${order.number || order.id} not confirmed, not retried: ${message}`);
+      return { status: 'unconfirmed', reason: message };
+    }
+    await recordResult(swell, order, { trustpilot_status: 'failed', trustpilot_error: message }, options.appId);
     console.error(`Trustpilot: invitation for order ${order.number || order.id} failed: ${message}`);
     return { status: 'failed', reason: message };
   }
 
   const now = new Date().toISOString();
-  await swell.put(
-    `/orders/${order.id}`,
-    appValues({
+  await recordResult(
+    swell,
+    order,
+    {
       trustpilot_status: 'sent',
       trustpilot_sent_at: now,
       trustpilot_send_time: payload.serviceReviewInvitation?.preferredSendTime || now,
       trustpilot_error: null,
-    }, options.appId),
+    },
+    options.appId,
   );
   console.log(`Trustpilot: invitation for order ${order.number || order.id} sent to ${order.account.email}`);
   return { status: 'sent' };

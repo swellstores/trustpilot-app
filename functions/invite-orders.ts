@@ -10,31 +10,34 @@ export const config: SwellConfig = {
 interface PageResult extends BatchStats {
   count: number;
   last_id: string | null;
-  // set when the app was disabled before the page was sent
-  disabled?: boolean;
+  // why the run stopped before the page was sent
+  stopped?: string;
 }
 
 export default class InviteOrders {
   async run(req: SwellWorkflowRequest, step: SwellWorkflowStep) {
     const data = (req.data || {}) as any;
-    const rawSettings = await step.do('load settings', async () => req.swell.settings());
-    const settings = getSettings(rawSettings);
+    // step output is stored with the run, so keep only what the run needs here, never the API key or secret
+    const check = await step.do('load settings', async () => {
+      const settings = getSettings(await req.swell.settings());
+      return { enabled: settings.enabled, missing: missingSettings(settings), invite_on: settings.invite_on };
+    });
 
-    if (!settings.enabled) {
+    // throw so the run ends as failed instead of completed
+    if (!check.enabled) {
       console.log('Trustpilot: invitations skipped, the app is disabled in settings');
-      return { error: 'disabled' };
+      throw new Error('Invitations not sent: the Trustpilot app is turned off in its settings.');
     }
-    const missing = missingSettings(settings);
-    if (missing.length) {
-      console.error(`Trustpilot: invitations skipped, missing ${missing.join(', ')} in app settings`);
-      return { error: 'missing_settings' };
+    if (check.missing.length) {
+      console.error(`Trustpilot: invitations skipped, missing ${check.missing.join(', ')} in app settings`);
+      throw new Error(`Invitations not sent: add the ${check.missing.join(', ')} in Apps → Trustpilot.`);
     }
 
     // orders selected in the list, or past orders since the date in the modal
     const query =
       data.$action?.source === 'bulk' && data.$action.selection?.query
         ? data.$action.selection.query
-        : pastOrdersQuery(settings.invite_on, parseSince(data.since));
+        : pastOrdersQuery(check.invite_on, parseSince(data.since));
 
     let totals = emptyStats();
     let lastId: string | null = null;
@@ -45,9 +48,16 @@ export default class InviteOrders {
         `page ${page}`,
         { retries: { limit: 5, delay: '30 seconds', backoff: 'exponential' } },
         async () => {
-          // stop sending if the app was disabled while the run was going
-          if (!getSettings(await req.swell.settings()).enabled) {
-            return { ...emptyStats(), count: 0, last_id: null, disabled: true };
+          // settings are read in each page so credentials stay out of step output;
+          // stop sending if the app was disabled or credentials removed while the run was going
+          const settings = getSettings(await req.swell.settings());
+          if (!settings.enabled) {
+            return { ...emptyStats(), count: 0, last_id: null, stopped: 'the app was turned off in its settings' };
+          }
+          const missing = missingSettings(settings);
+          if (missing.length) {
+            const stopped = `the ${missing.join(', ')} ${missing.length > 1 ? 'were' : 'was'} removed from the settings`;
+            return { ...emptyStats(), count: 0, last_id: null, stopped };
           }
           const orders = await fetchOrders(req.swell, query, afterId);
           if (!orders.length) {
@@ -59,9 +69,12 @@ export default class InviteOrders {
         },
       );
 
-      if (result.disabled) {
-        console.log(`Trustpilot: invitations stopped at page ${page}, the app was disabled in settings`);
-        return { ...totals, error: 'disabled' };
+      if (result.stopped) {
+        console.log(`Trustpilot: invitations stopped at page ${page}, ${result.stopped}`);
+        throw new Error(
+          `Invitations stopped: ${result.stopped}. Before stopping: sent ${totals.sent}, skipped ${totals.skipped}, ` +
+            `failed ${totals.failed}, not confirmed ${totals.unconfirmed}.`,
+        );
       }
 
       totals = addStats(totals, result);
@@ -73,7 +86,8 @@ export default class InviteOrders {
     }
 
     console.log(
-      `Trustpilot: invitations finished. Sent: ${totals.sent}, skipped: ${totals.skipped}, failed: ${totals.failed}`,
+      `Trustpilot: invitations finished. Sent: ${totals.sent}, skipped: ${totals.skipped}, ` +
+        `failed: ${totals.failed}, not confirmed: ${totals.unconfirmed}`,
     );
     return totals;
   }

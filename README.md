@@ -33,9 +33,14 @@ The invitation is sent with:
 
 - Orders that are canceled, drafts, or have no customer email are skipped and logged.
 - An order is invited once: after a successful invitation the app stores `trustpilot_status: sent` on the order and skips it
-  on later events and runs.
-- Network errors, HTTP 429 and 5xx are rethrown so Swell retries the event. Other errors (invalid email, rejected credentials)
-  are recorded on the order as `failed` with the message, or logged when no order was reached.
+  on later events and runs. If saving the status fails, the error is logged and the invitation is not sent again.
+- Invitations are never retried after Trustpilot may have created them, so a customer isn't emailed twice:
+  - HTTP 429 on the invitation (rejected, nothing created) is rethrown so Swell retries the event.
+  - A network error, timeout or 5xx on the invitation is recorded as `unconfirmed` with a note to check Trustpilot, and not
+    retried. Unconfirmed orders are skipped like sent ones; **Send again** sends a new invitation.
+  - Network errors, 429 and 5xx on the access token or templates are rethrown, since nothing has been sent yet.
+  - Other errors (invalid email, rejected credentials) are recorded on the order as `failed` with the message, or logged
+    when no order was reached.
 
 ### Product reviews
 
@@ -58,7 +63,7 @@ review invitation is sent. Product reviews must be part of the merchant's Trustp
 
 | Field                  | Shown as             | Meaning                                       |
 | ---------------------- | -------------------- | --------------------------------------------- |
-| `trustpilot_status`    | Invitation / column  | `sent`, or `failed` when Trustpilot rejected it |
+| `trustpilot_status`    | Invitation / column  | `sent`; `failed` when Trustpilot rejected it; `unconfirmed` (Not confirmed) when Trustpilot didn't answer and may have created it |
 | `trustpilot_sent_at`   | Sent to Trustpilot   | when the app created the invitation           |
 | `trustpilot_send_time` | Email goes out       | when Trustpilot emails the customer           |
 | `trustpilot_error`     | Error                | Trustpilot's message for the last failure     |
@@ -77,9 +82,14 @@ review invitation is sent. Product reviews must be part of the merchant's Trustp
 | Orders list → select orders → **Send Trustpilot invitations** | the selected orders (the bulk action's `selection.query`)                        |
 
 - Orders are read 50 at a time, oldest first (`id` cursor, `functions/lib/batch.ts`). Each page is one durable workflow step,
-  retried up to 5 times with exponential backoff (starting at 30 s) on network errors, HTTP 429 and 5xx.
+  retried up to 5 times with exponential backoff (starting at 30 s) on HTTP 429 from the invitation and on network errors,
+  429 and 5xx from the token, templates or Swell. Orders invited before the retry are skipped on it.
 - Invitations are sent right away (no delay), 5 at a time. Orders already invited, canceled, drafts or without email are skipped.
-- The workflow returns and logs the totals: sent, skipped and failed. Running it again is safe: invited orders are skipped.
+- The workflow returns and logs the totals: sent, skipped, failed and not confirmed. Running it again is safe: sent and
+  unconfirmed orders are skipped.
+- With **Enabled** off or a required setting missing, the run doesn't send anything and fails with the reason.
+- Settings are read again at the start of each page; only flags and **Send invitation when** are stored in the run's step
+  output, never the API key or secret.
 
 ### Test connection
 
@@ -89,11 +99,14 @@ review invitation is sent. Product reviews must be part of the merchant's Trustp
   TrustScore and review count, then gets an access token and lists the invitation templates with their IDs;
 - without one: looks up the business unit by the store's domain (`GET /v1/business-units/find?name=<domain>`) and shows its ID.
 
+Only a 404 from the business unit lookup is reported as an unknown ID. Other errors are shown with Trustpilot's message, with
+"try again later" only for temporary ones (network error, HTTP 429 or 5xx). **Send Trustpilot invitation** words its errors the same way.
+
 ### Turning the app off
 
 With **Enabled** off nothing is sent: order events return before loading the order, **Send Trustpilot invitation** says the
-app is off, and the workflow doesn't start. A running workflow checks the setting before each page and stops with
-`error: 'disabled'` and the totals so far. **Test connection** still works; it sends no customer data.
+app is off, and the workflow run fails without sending. A running workflow checks the setting before each page; the page
+being sent finishes, then the run fails with the totals so far. **Test connection** still works; it sends no customer data.
 
 ## Settings
 
@@ -164,8 +177,11 @@ Actions:
 
 ## Limits and known behavior
 
-- **One invitation per order.** Later events and runs skip orders with `trustpilot_status: sent`. Only **Send again** on the
-  order page sends a second one. Trustpilot may still apply its own duplicate rules per customer.
+- **One invitation per order.** Later events and runs skip orders with `trustpilot_status` `sent` or `unconfirmed`. Only
+  **Send again** on the order page sends a second one. Trustpilot may still apply its own duplicate rules per customer.
+- **Unconfirmed invitations aren't retried.** When Trustpilot doesn't answer the invitation request, the app can't tell whether
+  it was created. It marks the order **Not confirmed** instead of risking a second email; check Trustpilot Business →
+  **Invitations** and use **Send again** if it's missing.
 - **Customer email required.** Orders without an account email are skipped.
 - **Test orders are invited too.** Orders placed in test mode are not treated differently; use test customer emails.
 - **Order edits and cancellations after sending** don't change or withdraw the invitation already created in Trustpilot.

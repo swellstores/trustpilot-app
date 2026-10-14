@@ -41,7 +41,16 @@ async function check(settings: TrustpilotSettings, storeUrl: string | undefined)
     }
   }
 
-  const unit = await getBusinessUnit(settings.api_key, settings.business_unit_id);
+  let unit: any;
+  try {
+    unit = await getBusinessUnit(settings.api_key, settings.business_unit_id);
+  } catch (err) {
+    // only a 404 from the business unit lookup means a wrong ID; a 404 elsewhere is reported as it is
+    if (err instanceof TrustpilotError && err.status === 404) {
+      return `Business unit ${settings.business_unit_id} was not found in Trustpilot. Check the ID.`;
+    }
+    throw err;
+  }
   // business names such as "Alder & Co." already end with a period
   const name = String(unit?.displayName || settings.business_unit_id).replace(/\.+$/, '');
   const notes = [`Connected to ${name}.`];
@@ -70,9 +79,7 @@ export default async function (req: SwellRequest) {
           'Trustpilot rejected the API key or secret. Check them in Trustpilot Business → Integrations → Developers → APIs.',
       };
     }
-    if (err instanceof TrustpilotError && err.status === 404) {
-      return { message: `Business unit ${settings.business_unit_id} was not found in Trustpilot. Check the ID.` };
-    }
-    return { message: `Trustpilot request failed: ${err instanceof Error ? err.message : err}` };
+    const retry = err instanceof TrustpilotError && err.retryable ? ', try again later' : '';
+    return { message: `Trustpilot request failed${retry}: ${err instanceof Error ? err.message : err}` };
   }
 }

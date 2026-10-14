@@ -50,6 +50,20 @@ export default async function (req: SwellRequest) {
     if (result.status === 'failed') {
       return { message: `Trustpilot did not accept the invitation: ${result.reason}` };
     }
+    if (result.status === 'unconfirmed') {
+      return {
+        message:
+          `Trustpilot didn't confirm the invitation (${result.reason}). It may have been created: ` +
+          'check Trustpilot Business → Invitations before sending again.',
+      };
+    }
+    if (result.reason === 'already invited' && invitationStatus(order, req.appId).trustpilot_status === 'unconfirmed') {
+      return {
+        message:
+          "Trustpilot didn't confirm the last invitation for this order. Check Trustpilot Business → Invitations, " +
+          'and tick "Send again" only if it isn\'t there.',
+      };
+    }
     if (result.reason === 'already invited') {
       const sentAt = invitationStatus(order, req.appId).trustpilot_sent_at;
       return {
@@ -61,6 +75,8 @@ export default async function (req: SwellRequest) {
     if (err instanceof TrustpilotError && (err.status === 401 || err.status === 403)) {
       return { message: 'Trustpilot rejected the API key or secret. Run Test connection in Apps → Trustpilot.' };
     }
-    return { message: `Trustpilot request failed, try again later: ${err instanceof Error ? err.message : err}` };
+    // only temporary failures (network, rate limit, outage) are worth trying again
+    const retry = err instanceof TrustpilotError && err.retryable ? ', try again later' : '';
+    return { message: `Trustpilot request failed${retry}: ${err instanceof Error ? err.message : err}` };
   }
 }

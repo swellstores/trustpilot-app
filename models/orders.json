@@ -5,8 +5,8 @@
   "fields": {
     "trustpilot_status": {
       "type": "string",
-      "enum": ["sent", "failed"],
-      "description": "Trustpilot invitation status: sent, or failed when Trustpilot rejected it"
+      "enum": ["sent", "failed", "unconfirmed"],
+      "description": "Trustpilot invitation status: sent; failed when Trustpilot rejected it; unconfirmed when Trustpilot didn't answer and may have created it"
     },
     "trustpilot_sent_at": {
       "type": "date",

@@ -10,7 +10,8 @@
       "readonly": true,
       "options": [
         { "label": "Sent", "value": "sent" },
-        { "label": "Failed", "value": "failed" }
+        { "label": "Failed", "value": "failed" },
+        { "label": "Not confirmed", "value": "unconfirmed" }
       ]
     },
     {

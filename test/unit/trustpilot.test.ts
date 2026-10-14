@@ -375,11 +375,54 @@ describe("inviteOrder", () => {
     });
   });
 
-  it("rethrows retryable errors without recording them", async () => {
-    mockTrustpilot({ invite: { status: 503, body: { message: "down" } } });
+  it("rethrows a rate limit without recording it, since nothing was created", async () => {
+    mockTrustpilot({ invite: { status: 429, body: { message: "slow down" } } });
     const swell = makeSwell();
-    await expect(inviteOrder(swell, makeOrder(), makeContext(), { delayDays: 0 })).rejects.toThrow("Trustpilot 503");
+    await expect(inviteOrder(swell, makeOrder(), makeContext(), { delayDays: 0 })).rejects.toThrow("Trustpilot 429");
     expect(swell.put).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a server error", { status: 503, body: { message: "down" } }, "Trustpilot 503: down"],
+    ["a timeout", new Error("The operation timed out"), "Trustpilot 0: The operation timed out"],
+  ])("records %s as unconfirmed and doesn't retry", async (_, reply, reason) => {
+    mockTrustpilot({ invite: reply as any });
+    const swell = makeSwell();
+
+    expect(await inviteOrder(swell, makeOrder(), makeContext(), { delayDays: 0 })).toEqual({
+      status: "unconfirmed",
+      reason,
+    });
+    const values = swell.put.mock.calls[0][1].$app.trustpilot;
+    expect(values.trustpilot_status).toBe("unconfirmed");
+    expect(values.trustpilot_error).toBe(
+      `${reason}. Trustpilot may have created the invitation: check Trustpilot Business → Invitations before sending again.`,
+    );
+  });
+
+  it("doesn't invite an unconfirmed order again unless forced", async () => {
+    const fetchMock = mockTrustpilot();
+    const order = makeOrder({ $app: { trustpilot: { trustpilot_status: "unconfirmed" } } });
+
+    expect(await inviteOrder(makeSwell(), order, makeContext(), { delayDays: 0 })).toEqual({
+      status: "skipped",
+      reason: "already invited",
+    });
+    expect(inviteCalls(fetchMock)).toHaveLength(0);
+    expect(await inviteOrder(makeSwell(), order, makeContext(), { delayDays: 0, force: true })).toEqual({ status: "sent" });
+  });
+
+  it("doesn't throw when the order can't be updated after sending", async () => {
+    const fetchMock = mockTrustpilot();
+    const swell = makeSwell();
+    swell.put.mockRejectedValue(new Error("Swell unavailable"));
+
+    expect(await inviteOrder(swell, makeOrder(), makeContext(), { delayDays: 0 })).toEqual({ status: "sent" });
+    expect(inviteCalls(fetchMock)).toHaveLength(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/^Trustpilot: invitation result for order .+ not saved \(sent\):$/),
+      "Swell unavailable",
+    );
   });
 
   it("writes under another app id when given", async () => {
