@@ -58,7 +58,6 @@
       "id": "business_unit_id",
       "label": "Business unit ID",
       "type": "short_text",
-      "required": true,
       "description": "Your Trustpilot business profile ID. Leave empty and run Test connection to look it up by your store's domain."
     },
     {
@@ -109,7 +108,7 @@
               "label": "Sender name",
               "type": "short_text",
               "admin_span": 2,
-              "description": "Shown as the sender of the email. Empty: your Trustpilot business name."
+              "description": "Shown as the sender of the email. Empty: Trustpilot's default."
             },
             {
               "id": "reply_to",
@@ -172,7 +171,7 @@
           "type": "boolean",
           "ui": "toggle",
           "default": false,
-          "description": "Items with a SKU are added to the invitation"
+          "description": "Items with a SKU and a product name are added to the invitation"
         },
         {
           "type": "field_row",

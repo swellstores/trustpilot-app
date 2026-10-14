@@ -33,14 +33,15 @@ The invitation is sent with:
 
 - Orders that are canceled, drafts, or have no customer email are skipped and logged.
 - An order is invited once: after a successful invitation the app stores `trustpilot_status: sent` on the order and skips it
-  on later events and runs. If saving the status fails, the error is logged and the invitation is not sent again.
+  on later events and runs. If saving the status fails, the error is logged and the run doesn't retry the invitation;
+  the order shows no status, so a later run or event can invite it again.
 - Invitations are never retried after Trustpilot may have created them, so a customer isn't emailed twice:
   - HTTP 429 on the invitation (rejected, nothing created) is rethrown so Swell retries the event.
   - A network error, timeout or 5xx on the invitation is recorded as `unconfirmed` with a note to check Trustpilot, and not
     retried. Unconfirmed orders are skipped like sent ones; **Send again** sends a new invitation.
   - Network errors, 429 and 5xx on the access token or templates are rethrown, since nothing has been sent yet.
-  - Other errors (invalid email, rejected credentials) are recorded on the order as `failed` with the message, or logged
-    when no order was reached.
+  - Other errors on the invitation (e.g. invalid email) are recorded on the order as `failed` with the message. Rejected
+    credentials fail the access token request before the invitation and are logged only.
 
 ### Product reviews
 
@@ -49,13 +50,13 @@ With **Invite to product reviews** on, the invitation also gets a `productReview
 | Trustpilot product field | Swell value                                                                 |
 | ------------------------ | --------------------------------------------------------------------------- |
 | `sku`                    | variant SKU, else product SKU (items without a SKU are left out)            |
-| `name`                   | product name                                                                |
+| `name`                   | product name (items without one are left out)                               |
 | `brand`                  | product `brand`, when set                                                   |
 | `imageUrl`               | first variant image, else first product image                               |
-| `productUrl`             | **Product page URL** with `{slug}` / `{id}`, else `<store url>/products/<slug>` |
+| `productUrl`             | **Product page URL** with `{slug}` / `{id}`, else `<store url>/products/<slug>`; left out when the product has no value for a placeholder |
 
-Template: **Product template ID**, or the business unit's default product template. If no item has a SKU, only the service
-review invitation is sent. Product reviews must be part of the merchant's Trustpilot plan.
+Template: **Product template ID**, or the business unit's default product template. If no item has a SKU and a name, only
+the service review invitation is sent. Product reviews must be part of the merchant's Trustpilot plan.
 
 ### Invitation status on orders
 
@@ -117,7 +118,7 @@ Functions read them with `getSettings` (`functions/lib/trustpilot.ts`), which ap
 | --------------------- | -------- | -------- | ----------- | --------------------------------------------------------------------------- |
 | `api_key`             | secret   | yes      |             | Trustpilot API key (Business → Integrations → Developers → APIs).           |
 | `api_secret`          | secret   | yes      |             | API secret of the same application.                                         |
-| `business_unit_id`    | text     | yes      |             | Trustpilot business unit. Test connection can look it up by store domain.   |
+| `business_unit_id`    | text     | to send  |             | Trustpilot business unit. Leave empty and run Test connection to look it up by store domain. Nothing is sent without it. |
 | `enabled`             | toggle   | no       | on          | Turns off all invitations without uninstalling the app.                     |
 | `invite_on`           | select   | no       | `delivered` | `delivered` (Order is fulfilled), `paid` or `submitted` (Order is placed).  |
 | `delay_days`          | number   | no       | `3`         | Days Trustpilot waits before emailing (0–90). Not used for manual and bulk sends. |
@@ -166,7 +167,7 @@ Actions:
 5. In the Swell dashboard open **Apps → Trustpilot**, enter the API key and secret and save.
 6. Run **Actions → Test connection**. Without a Business unit ID it looks one up by the store domain; enter it and save,
    then run Test connection again to see your templates.
-7. Choose **Send invitation when**, **Days to wait** and the email options on the **Invitations** tab, and save.
+7. Choose **Send invitation when**, **Days to wait** and the email options in the **Invitations** section, and save.
 8. Optionally run **Actions → Invite past orders** for recent orders placed before the app was installed.
 9. To install in the live environment, create a version and install it:
 
@@ -188,9 +189,10 @@ Actions:
 - **Delay applies to automatic invitations only.** Manual, past and bulk sends go out right away.
 - **Access tokens** use the client credentials grant and are requested once per function run or workflow page; they are
   not cached between runs.
-- **Template defaults.** When no template ID is set, each run lists the templates and picks the default one of the matching
-  kind for the locale (or any default). Set the template IDs to skip that call.
-- **Product reviews** need SKUs and a Trustpilot plan with product reviews; items without a SKU are left out.
+- **Template defaults.** When no template ID is set, each run lists the templates and picks a template of the matching kind:
+  the default one for **Language**, else any default one, else one for **Language**. With no match, Trustpilot's own default
+  is used. Set the template IDs to skip that call.
+- **Product reviews** need SKUs and a Trustpilot plan with product reviews; items without a SKU or name are left out.
 - **Function timeout.** Each event makes at most 3 Trustpilot calls (token, templates, invitation) within the 10 s limit.
 - Trustpilot API hosts: `https://api.trustpilot.com/v1` and `https://invitations-api.trustpilot.com/v1` (`functions/lib/trustpilot.ts`).
 

@@ -214,6 +214,12 @@ describe("productUrl", () => {
     expect(productUrl(product, "", "")).toBeUndefined();
     expect(productUrl(null, "", "https://shop.example.com")).toBeUndefined();
   });
+
+  it("leaves the URL out when the product can't fill a placeholder", () => {
+    expect(productUrl({ id: "p1" }, "https://x.com/p/{slug}", "")).toBeUndefined();
+    expect(productUrl({ slug: "shirt" }, "https://x.com/p/{id}", "")).toBeUndefined();
+    expect(productUrl({ id: "p1" }, "https://x.com/p/{id}", "")).toBe("https://x.com/p/p1");
+  });
 });
 
 describe("buildProducts", () => {

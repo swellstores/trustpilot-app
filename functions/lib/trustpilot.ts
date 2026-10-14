@@ -265,7 +265,11 @@ export function productUrl(product: any, template: string, storeUrl: string): st
     return undefined;
   }
   if (template) {
-    return template.replace(/\{slug\}/g, product.slug || '').replace(/\{id\}/g, product.id || '');
+    // leave the URL out rather than send one with an empty placeholder
+    if ((template.includes('{slug}') && !product.slug) || (template.includes('{id}') && !product.id)) {
+      return undefined;
+    }
+    return template.replace(/\{slug\}/g, product.slug).replace(/\{id\}/g, product.id);
   }
   return storeUrl && product.slug ? `${storeUrl}/products/${product.slug}` : undefined;
 }
