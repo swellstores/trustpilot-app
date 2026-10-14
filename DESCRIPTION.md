@@ -12,4 +12,4 @@ Ask every customer for a Trustpilot review after their order, automatically.
 
 ## Setup
 
-Create an API application in Trustpilot Business → Integrations → Developers → APIs, enter the API key and secret in the app settings, then run **Test connection** to find your business unit ID and templates.
+You need a paid Trustpilot plan with the API module add-on; the Enterprise plan includes it, and the free plan has no API access. Create an API application in Trustpilot Business → Integrations → Developers → APIs, enter the API key and secret in the app settings, then run **Test connection** to find your business unit ID and templates.

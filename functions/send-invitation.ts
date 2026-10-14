@@ -73,7 +73,11 @@ export default async function (req: SwellRequest) {
     return { message: `Not sent: ${result.reason}.` };
   } catch (err) {
     if (err instanceof TrustpilotError && (err.status === 401 || err.status === 403)) {
-      return { message: 'Trustpilot rejected the API key or secret. Run Test connection in Apps → Trustpilot.' };
+      return {
+        message:
+          'Trustpilot rejected the API key or secret, or your plan doesn\'t include the API module. ' +
+          'Run Test connection in Apps → Trustpilot.',
+      };
     }
     // only temporary failures (network, rate limit, outage) are worth trying again
     const retry = err instanceof TrustpilotError && err.retryable ? ', try again later' : '';

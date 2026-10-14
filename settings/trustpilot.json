@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.swell.store/setting.json",
   "label": "Trustpilot",
-  "description": "Send Trustpilot review invitations to customers after their orders. Create an API application in Trustpilot Business → Integrations → Developers → APIs to get the API key and secret.",
+  "description": "Send Trustpilot review invitations to customers after their orders. Requires a paid Trustpilot plan with the API module (Enterprise includes it). Create an API application in Trustpilot Business → Integrations → Developers → APIs to get the API key and secret.",
   "actions": [
     {
       "id": "test_connection",

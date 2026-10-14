@@ -3,6 +3,11 @@
 A Swell app that sends [Trustpilot](https://www.trustpilot.com/) review invitations to customers after their orders, with an
 optional product review invitation, and records each invitation on the order.
 
+**Trustpilot plan.** The app uses the Trustpilot for Business API, which needs the paid
+[API module](https://developers.trustpilot.com/api-module-overview/) add-on (Enterprise includes API module tier 1). The free
+plan has no API access. API calls count against the module's yearly allowance, and every invitation also counts against the
+plan's invitation allowance.
+
 ## Features
 
 ### Invitations after orders
@@ -163,7 +168,8 @@ Actions:
    swell app push
    ```
 
-4. In Trustpilot Business, open **Integrations → Developers → APIs**, create an application and copy its API key and secret.
+4. Make sure your Trustpilot plan includes the API module. In Trustpilot Business, open **Integrations → Developers → APIs**,
+   create an application and copy its API key and secret.
 5. In the Swell dashboard open **Apps → Trustpilot**, enter the API key and secret and save.
 6. Run **Actions → Test connection**. Without a Business unit ID it looks one up by the store domain; enter it and save,
    then run Test connection again to see your templates.
@@ -183,6 +189,10 @@ Actions:
 - **Unconfirmed invitations aren't retried.** When Trustpilot doesn't answer the invitation request, the app can't tell whether
   it was created. It marks the order **Not confirmed** instead of risking a second email; check Trustpilot Business →
   **Invitations** and use **Send again** if it's missing.
+- **Paid Trustpilot plan with the API module.** Without it there are no API credentials; HTTP 401/403 from Trustpilot is
+  reported as rejected credentials with a note to check the plan. Each order event uses up to 3 API calls (token, templates
+  when a template ID isn't set, invitation) from the module's yearly allowance; bulk runs get the token and templates once
+  per 50 orders. Every invitation also counts against the plan's invitation allowance.
 - **Customer email required.** Orders without an account email are skipped.
 - **Test orders are invited too.** Orders placed in test mode are not treated differently; use test customer emails.
 - **Order edits and cancellations after sending** don't change or withdraw the invitation already created in Trustpilot.

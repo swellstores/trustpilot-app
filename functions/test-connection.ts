@@ -76,7 +76,8 @@ export default async function (req: SwellRequest) {
     if (err instanceof TrustpilotError && (err.status === 401 || err.status === 403)) {
       return {
         message:
-          'Trustpilot rejected the API key or secret. Check them in Trustpilot Business → Integrations → Developers → APIs.',
+          'Trustpilot rejected the API key or secret. Check them in Trustpilot Business → Integrations → Developers → APIs, ' +
+          'and that your Trustpilot plan includes the API module (not available on the free plan).',
       };
     }
     const retry = err instanceof TrustpilotError && err.retryable ? ', try again later' : '';

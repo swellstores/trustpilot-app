@@ -192,7 +192,10 @@ describe("test-connection", () => {
   it("explains rejected credentials", async () => {
     mockTrustpilot({ token: { status: 401, body: { message: "Unauthorized" } } });
     const { req } = request({}, null);
-    expect((await testConnection(req)).message).toMatch(/^Trustpilot rejected the API key or secret/);
+    expect((await testConnection(req)).message).toBe(
+      "Trustpilot rejected the API key or secret. Check them in Trustpilot Business → Integrations → Developers → APIs, " +
+        "and that your Trustpilot plan includes the API module (not available on the free plan).",
+    );
   });
 
   it("explains an unknown business unit", async () => {
@@ -296,7 +299,10 @@ describe("send-invitation", () => {
 
   it("explains rejected credentials and outages", async () => {
     mockTrustpilot({ token: { status: 401, body: { message: "Unauthorized" } } });
-    expect((await sendInvitation(request(action()).req)).message).toMatch(/^Trustpilot rejected the API key/);
+    expect((await sendInvitation(request(action()).req)).message).toBe(
+      "Trustpilot rejected the API key or secret, or your plan doesn't include the API module. " +
+        "Run Test connection in Apps → Trustpilot.",
+    );
 
     vi.restoreAllMocks();
     vi.spyOn(console, "log").mockImplementation(() => {});
