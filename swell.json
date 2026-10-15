@@ -1,39 +1,39 @@
 {
-  "description": "Send Trustpilot review invitations after orders",
-  "id": "trustpilot",
-  "name": "Trustpilot",
-  "type": "integration",
-  "version": "1.0.0",
-  "permissions": [],
-  "support_email": "support@swell.is",
-  "repository_url": "https://github.com/swellstores/trustpilot-app",
-  "integrations": [
-    "trustpilot"
-  ],
-  "images": [
-    {
-      "id": "settings",
-      "title": "Connected in a few minutes",
-      "description": "Paste your Trustpilot API key and secret, then test the connection.",
-      "image_src": "assets/screenshots/1-settings.png"
-    },
-    {
-      "id": "invitations",
-      "title": "Invitations on your schedule",
-      "description": "Choose when customers are asked, and how many days Trustpilot waits.",
-      "image_src": "assets/screenshots/2-invitations.png"
-    },
-    {
-      "id": "bulk-invitations",
-      "title": "Invite past customers in bulk",
-      "description": "Select orders and send invitations in one go, with their status in the list.",
-      "image_src": "assets/screenshots/3-bulk-invitations.png"
-    },
-    {
-      "id": "order-invitation",
-      "title": "Every invitation, on its order",
-      "description": "See when the email goes out, or send it again from the order.",
-      "image_src": "assets/screenshots/4-order-invitation.png"
-    }
-  ]
+	"description": "Send Trustpilot review invitations after orders",
+	"id": "trustpilot",
+	"name": "Trustpilot",
+	"type": "integration",
+	"version": "1.0.0",
+	"permissions": [],
+	"support_email": "support@swell.is",
+	"repository_url": "https://github.com/swellstores/trustpilot-app",
+	"integrations": [
+		"trustpilot"
+	],
+	"images": [
+		{
+			"id": "settings",
+			"title": "Connected in a few minutes",
+			"description": "Paste your Trustpilot API key and secret, then test the connection.",
+			"image_src": "assets/screenshots/1-settings.png"
+		},
+		{
+			"id": "invitations",
+			"title": "Invitations on your schedule",
+			"description": "Choose when customers are asked, and how many days Trustpilot waits.",
+			"image_src": "assets/screenshots/2-invitations.png"
+		},
+		{
+			"id": "bulk-invitations",
+			"title": "Invite past customers in bulk",
+			"description": "Select orders and send invitations in one go, with their status in the list.",
+			"image_src": "assets/screenshots/3-bulk-invitations.png"
+		},
+		{
+			"id": "order-invitation",
+			"title": "Every invitation, on its order",
+			"description": "See when the email goes out, or send it again from the order.",
+			"image_src": "assets/screenshots/4-order-invitation.png"
+		}
+	]
 }
