@@ -147,7 +147,7 @@
               "label": "Tags",
               "type": "short_text",
               "admin_span": 2,
-              "description": "Comma-separated tags added to reviews, e.g. swell, webshop"
+              "description": "Comma-separated tags added to service reviews, e.g. swell, webshop"
             },
             {
               "id": "redirect_uri",
