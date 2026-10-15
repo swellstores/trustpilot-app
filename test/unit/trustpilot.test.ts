@@ -451,6 +451,10 @@ describe("handleError", () => {
   it("rethrows retryable errors and logs the rest", () => {
     expect(() => handleError("x", new TrustpilotError(429, "slow"))).toThrow(TrustpilotError);
     handleError("x", new TrustpilotError(400, "bad"));
-    expect(errorSpy).toHaveBeenCalledWith("Trustpilot: x failed:", "Trustpilot 400: bad");
+    expect(errorSpy).toHaveBeenCalledWith("Trustpilot: x failed: Trustpilot 400: bad");
+    handleError("x", new TrustpilotError(400, "bad", "POST /v1/x"));
+    expect(errorSpy).toHaveBeenCalledWith("Trustpilot: x failed: Trustpilot 400: bad (POST /v1/x)");
+    handleError("x", new Error("plain"));
+    expect(errorSpy).toHaveBeenCalledWith("Trustpilot: x failed: plain");
   });
 });

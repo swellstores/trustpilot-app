@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PAGE_SIZE } from "../../functions/lib/batch";
-import InviteOrders, { config } from "../../functions/invite-orders";
+import InviteOrders, { config, permanentMessage } from "../../functions/invite-orders";
+import { TrustpilotError } from "../../functions/lib/trustpilot";
 import { inviteCalls, makeOrder, mockTrustpilot, rawSettings } from "../helpers/trustpilot-fixtures";
 
 beforeEach(() => {
@@ -164,6 +165,37 @@ describe("invite-orders workflow", () => {
     const json = JSON.stringify(outputs);
     expect(json).not.toContain(rawSettings.api_key);
     expect(json).not.toContain(rawSettings.api_secret);
+  });
+
+  it("fails right away on rejected credentials instead of retrying", async () => {
+    mockTrustpilot({ token: { status: 401, body: { message: "Unauthorized" } } });
+    const { req } = makeReq([ids(2)]);
+    const { step } = makeStep();
+
+    await expect(new InviteOrders().run(req, step)).rejects.toThrow(
+      "Invitations failed on page 1. Trustpilot rejected the API key or secret, or your plan doesn't include the API module. Run Test connection in Apps → Trustpilot. Before failing: sent 0, skipped 0, failed 0, not confirmed 0.",
+    );
+  });
+
+  it("explains a wrong business unit and other permanent errors", () => {
+    expect(permanentMessage(new TrustpilotError(404, "Not found", "GET /v1/private/business-units/bu/templates"))).toBe(
+      "Trustpilot couldn't find GET /v1/private/business-units/bu/templates. Check the Business unit ID.",
+    );
+    expect(permanentMessage(new TrustpilotError(400, "Bad", "POST /v1/x"))).toBe("Trustpilot refused POST /v1/x: Bad");
+  });
+
+  it("throws temporary errors so the page is retried", async () => {
+    mockTrustpilot({ token: { status: 503, body: { message: "down" } } });
+    const { req } = makeReq([ids(1)]);
+    await expect(new InviteOrders().run(req, makeStep().step)).rejects.toMatchObject({ status: 503 });
+  });
+
+  it("fails when Trustpilot rejected every invitation it was sent", async () => {
+    mockTrustpilot({ invite: { status: 400, body: { message: "Invalid email" } } });
+    const { req } = makeReq([ids(2)]);
+    await expect(new InviteOrders().run(req, makeStep().step)).rejects.toThrow(
+      "Invitations finished, but Trustpilot rejected all 2 invitations it was sent; the reasons are on each order's Trustpilot tab. Totals: sent 0, skipped 0, failed 2, not confirmed 0.",
+    );
   });
 
   it("retries pages with backoff", async () => {

@@ -1,4 +1,13 @@
-import { INVITE_EVENTS, createInviteContext, getOrder, handleError, inviteOrder, loadSettings } from './lib/trustpilot';
+import {
+  INVITE_EVENTS,
+  alreadyInvited,
+  createInviteContext,
+  getOrder,
+  handleError,
+  inviteOrder,
+  loadSettings,
+  skipReason,
+} from './lib/trustpilot';
 
 export const config: SwellConfig = {
   description: 'Send Trustpilot review invitations for orders',
@@ -24,6 +33,13 @@ export default async function (req: SwellRequest) {
   const order = await getOrder(swell, data.id);
   if (!order) {
     console.error(`Trustpilot: order ${data.id} not found`);
+    return;
+  }
+
+  // checked before getting a token: an event delivered again, or an order that can't be invited, needs no Trustpilot call
+  const reason = skipReason(order) || (alreadyInvited(order, req.appId) ? 'already invited' : null);
+  if (reason) {
+    console.log(`Trustpilot: order ${order.number || order.id} skipped, ${reason}`);
     return;
   }
 

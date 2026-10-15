@@ -36,7 +36,8 @@ The invitation is sent with:
 | `…preferredSendTime`                 | now + **Days to wait** (left out when 0, so Trustpilot sends right away)       |
 | `…tags`, `…redirectUri`              | **Tags**, **Redirect URL** (left out when empty)                               |
 
-- Orders that are canceled, drafts, or have no customer email are skipped and logged.
+- Orders that are canceled, drafts, have no customer email, or were already invited (`sent` or `unconfirmed`) are skipped
+  and logged before any Trustpilot call, so a repeated event costs no API calls.
 - An order is invited once: after a successful invitation the app stores `trustpilot_status: sent` on the order and skips it
   on later events and runs. If saving the status fails, the error is logged and the run doesn't retry the invitation;
   the order shows no status, so a later run or event can invite it again.
@@ -47,6 +48,7 @@ The invitation is sent with:
   - Network errors, 429 and 5xx on the access token or templates are rethrown, since nothing has been sent yet.
   - Other errors on the invitation (e.g. invalid email) are recorded on the order as `failed` with the message. Rejected
     credentials fail the access token request before the invitation and are logged only.
+  - Logged errors include the refused call, e.g. `(POST /v1/private/business-units/{id}/email-invitations)`.
 
 ### Product reviews
 
@@ -90,6 +92,11 @@ the service review invitation is sent. Product reviews must be part of the merch
 - Orders are read 50 at a time, oldest first (`id` cursor, `functions/lib/batch.ts`). Each page is one durable workflow step,
   retried up to 5 times with exponential backoff (starting at 30 s) on HTTP 429 from the invitation and on network errors,
   429 and 5xx from the token, templates or Swell. Orders invited before the retry are skipped on it.
+- Permanent Trustpilot errors (rejected credentials or a plan without the API module, an unknown business unit, other 4xx
+  on the token or templates) aren't retried: the run fails right away with "Invitations failed on page N. …" and the
+  totals so far.
+- A run where Trustpilot rejected every invitation it was sent (none sent or not confirmed) ends as failed, with the
+  totals; the reasons are on each order's Trustpilot tab.
 - Invitations are sent right away (no delay), 5 at a time. Orders already invited, canceled, drafts or without email are skipped.
 - The workflow returns and logs the totals: sent, skipped, failed and not confirmed. Running it again is safe: sent and
   unconfirmed orders are skipped.
@@ -104,6 +111,7 @@ the service review invitation is sent. Product reviews must be part of the merch
 - with a **Business unit ID**: reads the business unit (`GET /v1/business-units/{id}`, `apikey` header) and shows its name,
   TrustScore and review count, then gets an access token and lists the invitation templates with their IDs;
 - without one: looks up the business unit by the store's domain (`GET /v1/business-units/find?name=<domain>`) and shows its ID.
+- with **Enabled** off it still runs, and adds that no invitations are sent until the app is turned on.
 
 Only a 404 from the business unit lookup is reported as an unknown ID. Other errors are shown with Trustpilot's message, with
 "try again later" only for temporary ones (network error, HTTP 429 or 5xx). **Send Trustpilot invitation** words its errors the same way.
@@ -112,7 +120,8 @@ Only a 404 from the business unit lookup is reported as an unknown ID. Other err
 
 With **Enabled** off nothing is sent: order events return before loading the order, **Send Trustpilot invitation** says the
 app is off, and the workflow run fails without sending. A running workflow checks the setting before each page; the page
-being sent finishes, then the run fails with the totals so far. **Test connection** still works; it sends no customer data.
+being sent finishes, then the run fails with the totals so far. **Test connection** still works, says the app is off,
+and sends no customer data.
 
 ## Settings
 
@@ -192,7 +201,8 @@ Actions:
 - **Paid Trustpilot plan with the API module.** Without it there are no API credentials; HTTP 401/403 from Trustpilot is
   reported as rejected credentials with a note to check the plan. Each order event uses up to 3 API calls (token, templates
   when a template ID isn't set, invitation) from the module's yearly allowance; bulk runs get the token and templates once
-  per 50 orders. Every invitation also counts against the plan's invitation allowance.
+  per 50 orders. Every invitation also counts against the plan's invitation allowance. Orders that won't be invited
+  (already invited, canceled, no email) make no calls.
 - **Customer email required.** Orders without an account email are skipped.
 - **Test orders are invited too.** Orders placed in test mode are not treated differently; use test customer emails.
 - **Order edits and cancellations after sending** don't change or withdraw the invitation already created in Trustpilot.

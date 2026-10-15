@@ -109,12 +109,27 @@ describe("order-invitations", () => {
     expect(swell.put).not.toHaveBeenCalled();
   });
 
+  it("doesn't get a token for orders that won't be invited", async () => {
+    for (const order of [
+      makeOrder({ $app: { trustpilot: { trustpilot_status: "unconfirmed" } } }),
+      makeOrder({ canceled: true }),
+      makeOrder({ account: { email: "" } }),
+    ]) {
+      const fetchMock = mockTrustpilot();
+      await orderInvitations(request({ id: "ord_1", $event: { type: "order.delivered" } }, order).req);
+      expect(fetchMock).not.toHaveBeenCalled();
+      fetchMock.mockRestore();
+    }
+  });
+
   it("logs rejected credentials without retrying", async () => {
     mockTrustpilot({ token: { status: 401, body: { message: "Unauthorized" } } });
     const { req } = request({ id: "ord_1", $event: { type: "order.delivered" } });
 
     await expect(orderInvitations(req)).resolves.toBeUndefined();
-    expect(errorSpy).toHaveBeenCalledWith("Trustpilot: invitation for order ord_1 failed:", "Trustpilot 401: Unauthorized");
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Trustpilot: invitation for order ord_1 failed: Trustpilot 401: Unauthorized (POST /v1/oauth/oauth-business-users-for-applications/accesstoken)",
+    );
   });
 
   it("throws a rate limit so Swell retries", async () => {
@@ -224,10 +239,12 @@ describe("test-connection", () => {
     );
   });
 
-  it("works while the app is disabled", async () => {
+  it("works while the app is disabled, and says it's off", async () => {
     mockTrustpilot();
     const { req } = request({}, null, { ...rawSettings, enabled: false });
-    expect((await testConnection(req)).message).toMatch(/^Connected to Alder & Co\./);
+    const { message } = await testConnection(req);
+    expect(message).toMatch(/^Connected to Alder & Co\./);
+    expect(message).toMatch(/The app is turned off, so no invitations are sent until you turn it on\.$/);
   });
 });
 

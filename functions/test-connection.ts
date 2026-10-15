@@ -71,7 +71,10 @@ export default async function (req: SwellRequest) {
   }
 
   try {
-    return { message: await check(settings, req.store?.url) };
+    const message = await check(settings, req.store?.url);
+    return {
+      message: settings.enabled ? message : `${message} The app is turned off, so no invitations are sent until you turn it on.`,
+    };
   } catch (err) {
     if (err instanceof TrustpilotError && (err.status === 401 || err.status === 403)) {
       return {

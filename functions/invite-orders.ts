@@ -1,5 +1,5 @@
 import { PAGE_SIZE, addStats, emptyStats, fetchOrders, invitePage, parseSince, pastOrdersQuery, type BatchStats } from './lib/batch';
-import { createInviteContext, getSettings, missingSettings } from './lib/trustpilot';
+import { TrustpilotError, createInviteContext, detailOf, getSettings, missingSettings } from './lib/trustpilot';
 
 export const config: SwellConfig = {
   kind: 'workflow',
@@ -12,6 +12,20 @@ interface PageResult extends BatchStats {
   last_id: string | null;
   // why the run stopped before the page was sent
   stopped?: string;
+}
+
+const totalsText = (t: BatchStats) =>
+  `sent ${t.sent}, skipped ${t.skipped}, failed ${t.failed}, not confirmed ${t.unconfirmed}`;
+
+// a permanent Trustpilot error as the merchant should read it
+export function permanentMessage(err: TrustpilotError): string {
+  if (err.status === 401 || err.status === 403) {
+    return "Trustpilot rejected the API key or secret, or your plan doesn't include the API module. Run Test connection in Apps → Trustpilot.";
+  }
+  if (err.status === 404) {
+    return `Trustpilot couldn't find ${err.endpoint || 'the business unit'}. Check the Business unit ID.`;
+  }
+  return `Trustpilot refused ${err.endpoint || 'the request'}: ${err.message.replace(/^Trustpilot \d+: /, '')}`;
 }
 
 export default class InviteOrders {
@@ -44,7 +58,7 @@ export default class InviteOrders {
 
     for (let page = 1; ; page++) {
       const afterId = lastId;
-      const result: PageResult = await step.do(
+      const result: PageResult | { error: string } = await step.do(
         `page ${page}`,
         { retries: { limit: 5, delay: '30 seconds', backoff: 'exponential' } },
         async () => {
@@ -63,18 +77,28 @@ export default class InviteOrders {
           if (!orders.length) {
             return { ...emptyStats(), count: 0, last_id: null };
           }
-          const ctx = await createInviteContext(settings, req.store?.url);
-          const stats = await invitePage(req.swell, orders, ctx, req.appId);
-          return { ...stats, count: orders.length, last_id: orders[orders.length - 1]?.id ?? null };
+          // step.do retries every thrown error, so permanent Trustpilot errors (bad credentials, wrong business unit)
+          // are returned and fail the run right away; network errors, 429 and 5xx are thrown and retried
+          try {
+            const ctx = await createInviteContext(settings, req.store?.url);
+            const stats = await invitePage(req.swell, orders, ctx, req.appId);
+            return { ...stats, count: orders.length, last_id: orders[orders.length - 1]?.id ?? null };
+          } catch (err) {
+            if (err instanceof TrustpilotError && !err.retryable) {
+              console.error(`Trustpilot: invitations failed: ${detailOf(err)}`);
+              return { error: permanentMessage(err) };
+            }
+            throw err;
+          }
         },
       );
 
+      if ('error' in result) {
+        throw new Error(`Invitations failed on page ${page}. ${result.error} Before failing: ${totalsText(totals)}.`);
+      }
       if (result.stopped) {
         console.log(`Trustpilot: invitations stopped at page ${page}, ${result.stopped}`);
-        throw new Error(
-          `Invitations stopped: ${result.stopped}. Before stopping: sent ${totals.sent}, skipped ${totals.skipped}, ` +
-            `failed ${totals.failed}, not confirmed ${totals.unconfirmed}.`,
-        );
+        throw new Error(`Invitations stopped: ${result.stopped}. Before stopping: ${totalsText(totals)}.`);
       }
 
       totals = addStats(totals, result);
@@ -85,6 +109,12 @@ export default class InviteOrders {
       }
     }
 
+    // a run where Trustpilot rejected every invitation it was sent shouldn't look successful
+    if (totals.failed && !totals.sent && !totals.unconfirmed) {
+      throw new Error(
+        `Invitations finished, but Trustpilot rejected all ${totals.failed} invitations it was sent; the reasons are on each order's Trustpilot tab. Totals: ${totalsText(totals)}.`,
+      );
+    }
     console.log(
       `Trustpilot: invitations finished. Sent: ${totals.sent}, skipped: ${totals.skipped}, ` +
         `failed: ${totals.failed}, not confirmed: ${totals.unconfirmed}`,

@@ -39,11 +39,19 @@ export interface TrustpilotSettings {
 // Error returned by the Trustpilot API (or a network failure when status is 0)
 export class TrustpilotError extends Error {
   status: number;
+  // the call Trustpilot refused, e.g. "POST /v1/private/business-units/{id}/email-invitations" (no query string)
+  endpoint: string | undefined;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, endpoint?: string) {
     super(`Trustpilot ${status}: ${message}`);
     this.name = 'TrustpilotError';
     this.status = status;
+    this.endpoint = endpoint;
+  }
+
+  // message with the refused call, for logs and workflow errors
+  get detail(): string {
+    return this.endpoint ? `${this.message} (${this.endpoint})` : this.message;
   }
 
   // network errors, rate limits and server errors are worth retrying
@@ -127,11 +135,12 @@ export async function loadSettings(swell: SwellClient): Promise<TrustpilotSettin
 
 // call the Trustpilot API; returns parsed JSON or null for empty responses
 export async function trustpilotRequest(url: string, init: RequestInit): Promise<any> {
+  const endpoint = `${init.method || 'GET'} ${new URL(url).pathname}`;
   let res: Response;
   try {
     res = await fetch(url, init);
   } catch (err: any) {
-    throw new TrustpilotError(0, err?.message || String(err));
+    throw new TrustpilotError(0, err?.message || String(err), endpoint);
   }
 
   const text = await res.text();
@@ -146,7 +155,7 @@ export async function trustpilotRequest(url: string, init: RequestInit): Promise
 
   if (!res.ok) {
     const message = json?.message || json?.details || json?.error_description || json?.error || text || res.statusText;
-    throw new TrustpilotError(res.status, typeof message === 'string' ? message : JSON.stringify(message));
+    throw new TrustpilotError(res.status, typeof message === 'string' ? message : JSON.stringify(message), endpoint);
   }
 
   return json;
@@ -427,11 +436,11 @@ export async function inviteOrder(
     if (err instanceof TrustpilotError && err.retryable) {
       const note = `${message}. Trustpilot may have created the invitation: check Trustpilot Business → Invitations before sending again.`;
       await recordResult(swell, order, { trustpilot_status: 'unconfirmed', trustpilot_error: note }, options.appId);
-      console.error(`Trustpilot: invitation for order ${order.number || order.id} not confirmed, not retried: ${message}`);
+      console.error(`Trustpilot: invitation for order ${order.number || order.id} not confirmed, not retried: ${detailOf(err)}`);
       return { status: 'unconfirmed', reason: message };
     }
     await recordResult(swell, order, { trustpilot_status: 'failed', trustpilot_error: message }, options.appId);
-    console.error(`Trustpilot: invitation for order ${order.number || order.id} failed: ${message}`);
+    console.error(`Trustpilot: invitation for order ${order.number || order.id} failed: ${detailOf(err)}`);
     return { status: 'failed', reason: message };
   }
 
@@ -456,10 +465,16 @@ export async function getOrder(swell: SwellClient, id: string): Promise<any> {
   return swell.get('/orders/{id}', { id, expand: ['account', 'items.product', 'items.variant'] });
 }
 
+// error message with the refused call when it's a Trustpilot error
+export function detailOf(err: unknown): string {
+  if (err instanceof TrustpilotError) return err.detail;
+  return err instanceof Error ? err.message : String(err);
+}
+
 // rethrow errors Swell should retry, log the rest
 export function handleError(label: string, err: unknown): void {
   if (err instanceof TrustpilotError && err.retryable) {
     throw err;
   }
-  console.error(`Trustpilot: ${label} failed:`, err instanceof Error ? err.message : err);
+  console.error(`Trustpilot: ${label} failed: ${detailOf(err)}`);
 }
