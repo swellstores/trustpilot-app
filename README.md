@@ -28,7 +28,7 @@ The invitation is sent with:
 | Trustpilot field                     | Value                                                                          |
 | ------------------------------------ | ------------------------------------------------------------------------------ |
 | `consumerEmail`                      | order account email                                                            |
-| `consumerName`                       | billing name, account name, shipping name, or the email's local part           |
+| `consumerName`                       | billing name (or first + last), account name (or first + last), shipping name, or the email's local part |
 | `referenceNumber`                    | order `number` (falls back to `id`)                                            |
 | `locale`                             | **Language** (default `en-US`)                                                 |
 | `senderName`, `replyTo`              | **Sender name**, **Reply-to email** (left out when empty)                      |
@@ -140,7 +140,7 @@ Functions read them with `getSettings` (`functions/lib/trustpilot.ts`), which ap
 | `reply_to`            | email    | no       |             | Reply-to address. Empty: Trustpilot's default.                              |
 | `locale`              | text     | no       | `en-US`     | Locale of the email and review page.                                        |
 | `service_template_id` | text     | no       |             | Invitation template. Empty: the business unit's default service template.   |
-| `tags`                | text     | no       |             | Comma-separated tags added to the reviews.                                  |
+| `tags`                | text     | no       |             | Comma-separated tags added to the service review invitation.      |
 | `redirect_uri`        | url      | no       |             | Page shown after the review. Empty: Trustpilot's page.                      |
 | `product_reviews`     | toggle   | no       | off         | Add a product review invitation for items with a SKU.                       |
 | `product_template_id` | text     | no       |             | Product review template. Empty: the default product template.               |
