@@ -33,18 +33,26 @@ The invitation is sent with:
 | `locale`                             | **Language** (default `en-US`)                                                 |
 | `senderName`, `replyTo`              | **Sender name**, **Reply-to email** (left out when empty)                      |
 | `serviceReviewInvitation.templateId` | **Template ID**, or the business unit's default service template               |
-| `…preferredSendTime`                 | now + **Days to wait** (left out when 0, so Trustpilot sends right away)       |
+| `…preferredSendTime`                 | now + **Days to wait** (left out when 0, so Trustpilot sends right away). A cleared field keeps the default 3 days |
 | `…tags`, `…redirectUri`              | **Tags**, **Redirect URL** (left out when empty)                               |
 
 - Orders that are canceled, drafts, have no customer email, or were already invited (`sent` or `unconfirmed`) are skipped
   and logged before any Trustpilot call, so a repeated event costs no API calls.
+- **Test environment.** Orders in Swell's test environment reach real customer emails, so they're skipped ("test
+  environment order (Invite test orders is off)") unless **Invite test orders** is on. The environment is the
+  `Swell-Env` header of the function (exactly `test`); the workflow gets it from the
+  action that starts it. `order.test` isn't used: it marks test payments, and not every order in the test environment
+  has it.
+- The event function checks **Enabled** and **Send invitation when** before the other settings, so a missing setting is
+  logged once per order (for the configured event), not for every order event.
 - An order is invited once: after a successful invitation the app stores `trustpilot_status: sent` on the order and skips it
   on later events and runs. If saving the status fails, the error is logged and the run doesn't retry the invitation;
   the order shows no status, so a later run or event can invite it again.
 - Invitations are never retried after Trustpilot may have created them, so a customer isn't emailed twice:
   - HTTP 429 on the invitation (rejected, nothing created) is rethrown so Swell retries the event.
   - A network error, timeout or 5xx on the invitation is recorded as `unconfirmed` with a note to check Trustpilot, and not
-    retried. Unconfirmed orders are skipped like sent ones; **Send again** sends a new invitation.
+    retried. Unconfirmed orders are skipped like sent ones; **Send again** sends a new invitation. The note asks the
+    merchant to check their invitations in Trustpilot Business.
   - Network errors, 429 and 5xx on the access token or templates are rethrown, since nothing has been sent yet.
   - Other errors on the invitation (e.g. invalid email) are recorded on the order as `failed` with the message. Rejected
     credentials fail the access token request before the invitation and are logged only.
@@ -60,7 +68,10 @@ With **Invite to product reviews** on, the invitation also gets a `productReview
 | `name`                   | product name (items without one are left out)                               |
 | `brand`                  | product `brand`, when set                                                   |
 | `imageUrl`               | first variant image, else first product image                               |
-| `productUrl`             | **Product page URL** with `{slug}` / `{id}`, else `<store url>/products/<slug>`; left out when the product has no value for a placeholder |
+| `productUrl`             | **Product page URL** with `{slug}` / `{id}`, else `<store url>/products/<slug>` (the store URL comes from the function, and for past and bulk sends from the action that starts the workflow); left out when the product has no value for a placeholder |
+
+`productReviewInvitation.preferredSendTime` is one minute after the service invitation's: Trustpilot requires the service
+invitation to come first when both have a send time.
 
 Template: **Product template ID**, or the business unit's default product template. If no item has a SKU and a name, only
 the service review invitation is sent. Product reviews must be part of the merchant's Trustpilot plan.
@@ -82,16 +93,20 @@ the service review invitation is sent. Product reviews must be part of the merch
 
 ### Invite past and selected orders
 
-`functions/invite-orders.ts` is a workflow started by two actions:
+`functions/invite-orders.ts` is a workflow. Workflows get no request headers and only the store id, so both actions run
+`functions/start-invitations.ts`, which starts it with `workflows.create('invite-orders', { env, store_url, since | query })`
+and answers "Invitations started. Follow them in the Workflows tab of the Trustpilot app." The workflow trusts this input
+only from a run a function started.
 
 | Action                                         | Orders                                                                                      |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | **Apps → Trustpilot → Actions → Invite past orders** | placed since the modal's **Orders placed since** date, in the **Send invitation when** state, not canceled |
-| Orders list → select orders → **Send Trustpilot invitations** | the selected orders (the bulk action's `selection.query`)                        |
+| Orders list → select orders → **Send Trustpilot invitations** | the selected orders (the bulk action's `selection.query`, passed as `query`)      |
 
 - Orders are read 50 at a time, oldest first (`id` cursor, `functions/lib/batch.ts`). Each page is one durable workflow step,
   retried up to 5 times with exponential backoff (starting at 30 s) on HTTP 429 from the invitation and on network errors,
-  429 and 5xx from the token, templates or Swell. Orders invited before the retry are skipped on it.
+  429 and 5xx from the token, templates or Swell. Orders invited before the retry aren't invited again; they count as
+  sent when this run invited them (their `trustpilot_sent_at` is after the run's start, kept in the first step's output).
 - Permanent Trustpilot errors (rejected credentials or a plan without the API module, an unknown business unit, other 4xx
   on the token or templates) aren't retried: the run fails right away with "Invitations failed on page N. …" and the
   totals so far.
@@ -101,8 +116,8 @@ the service review invitation is sent. Product reviews must be part of the merch
 - The workflow returns and logs the totals: sent, skipped, failed and not confirmed. Running it again is safe: sent and
   unconfirmed orders are skipped.
 - With **Enabled** off or a required setting missing, the run doesn't send anything and fails with the reason.
-- Settings are read again at the start of each page; only flags and **Send invitation when** are stored in the run's step
-  output, never the API key or secret.
+- Settings are read again at the start of each page; only flags, **Send invitation when** and the run's start time are
+  stored in the run's step output, never the API key or secret.
 
 ### Test connection
 
@@ -139,7 +154,7 @@ Functions read them with `getSettings` (`functions/lib/trustpilot.ts`), which ap
 | `business_unit_id`    | text     | to send  |             | Trustpilot business unit. Leave empty and run Test connection to look it up by store domain. Nothing is sent without it. |
 | `enabled`             | toggle   | no       | on          | Turns off all invitations without uninstalling the app.                     |
 | `invite_on`           | select   | no       | `delivered` | `delivered` (Order is fulfilled), `paid` or `submitted` (Order is placed).  |
-| `delay_days`          | number   | no       | `3`         | Days Trustpilot waits before emailing (0–90). Not used for manual and bulk sends. |
+| `delay_days`          | number   | no       | `3`         | Days Trustpilot waits before emailing (0–90); a cleared field keeps 3. Not used for manual and bulk sends. |
 | `sender_name`         | text     | no       |             | Email sender name. Empty: Trustpilot's default.                             |
 | `reply_to`            | email    | no       |             | Reply-to address. Empty: Trustpilot's default.                              |
 | `locale`              | text     | no       | `en-US`     | Locale of the email and review page.                                        |
@@ -149,15 +164,16 @@ Functions read them with `getSettings` (`functions/lib/trustpilot.ts`), which ap
 | `product_reviews`     | toggle   | no       | off         | Add a product review invitation for items with a SKU.                       |
 | `product_template_id` | text     | no       |             | Product review template. Empty: the default product template.               |
 | `product_url`         | text     | no       |             | Product page URL with `{slug}` or `{id}`. Empty: `<store url>/products/<slug>`. |
+| `invite_test_orders`  | toggle   | no       | off         | Also invite orders in Swell's test environment (they go to real emails).    |
 
 Actions:
 
 | Action                        | Where                      | Function                          | Options                                  |
 | ----------------------------- | -------------------------- | --------------------------------- | ---------------------------------------- |
 | Test connection               | settings                   | `test-connection.ts` (function)   |                                          |
-| Invite past orders            | settings                   | `invite-orders.ts` (workflow)     | `since` date (required)                  |
+| Invite past orders            | settings                   | `start-invitations.ts` → `invite-orders.ts` (workflow) | `since` date (required) |
 | Send Trustpilot invitation    | order page, Actions menu   | `send-invitation.ts` (function)   | `send_again` checkbox                    |
-| Send Trustpilot invitations   | orders list, bulk action   | `invite-orders.ts` (workflow)     |                                          |
+| Send Trustpilot invitations   | orders list, bulk action   | `start-invitations.ts` → `invite-orders.ts` (workflow) |                 |
 
 ## Setup
 
@@ -200,15 +216,16 @@ Actions:
 - **One invitation per order.** Later events and runs skip orders with `trustpilot_status` `sent` or `unconfirmed`. Only
   **Send again** on the order page sends a second one. Trustpilot may still apply its own duplicate rules per customer.
 - **Unconfirmed invitations aren't retried.** When Trustpilot doesn't answer the invitation request, the app can't tell whether
-  it was created. It marks the order **Not confirmed** instead of risking a second email; check Trustpilot Business →
-  **Invitations** and use **Send again** if it's missing.
+  it was created. It marks the order **Not confirmed** instead of risking a second email; check your invitations in
+  Trustpilot Business and use **Send again** if it's missing.
 - **Paid Trustpilot plan with the API module.** Without it there are no API credentials; HTTP 401/403 from Trustpilot is
   reported as rejected credentials with a note to check the plan. Each order event uses up to 3 API calls (token, templates
   when a template ID isn't set, invitation) from the module's yearly allowance; bulk runs get the token and templates once
   per 50 orders. Every invitation also counts against the plan's invitation allowance. Orders that won't be invited
   (already invited, canceled, no email) make no calls.
 - **Customer email required.** Orders without an account email are skipped.
-- **Test orders are invited too.** Orders placed in test mode are not treated differently; use test customer emails.
+- **Test orders are skipped.** Orders in Swell's test environment aren't invited unless **Invite test orders** is on; turn it
+  on only with your own customer emails.
 - **Order edits and cancellations after sending** don't change or withdraw the invitation already created in Trustpilot.
 - **Delay applies to automatic invitations only.** Manual, past and bulk sends go out right away.
 - **Access tokens** use the client credentials grant and are requested once per function run or workflow page; they are
@@ -228,6 +245,7 @@ Actions:
 functions/
   order-invitations.ts  # order.submitted/paid/delivered → invitation for the configured event
   send-invitation.ts    # order page action: send now (optionally again)
+  start-invitations.ts  # actions: start the workflow with the environment, store URL and orders
   invite-orders.ts      # workflow: past orders (settings action) or selected orders (bulk action)
   test-connection.ts    # settings action: business unit, TrustScore, templates
   lib/trustpilot.ts     # settings, Trustpilot API client, payload mapping, inviteOrder
@@ -258,9 +276,9 @@ Tests run in the Cloudflare Workers runtime via `@cloudflare/vitest-pool-workers
 (or `SWELL_STORE_ID` / `SWELL_SESSION_ID` in CI). Unit tests mock `fetch` by Trustpilot endpoint
 (`test/helpers/trustpilot-fixtures.ts`), so no real Trustpilot calls are made.
 
-To try it end to end, set real credentials in the test environment, set **Days to wait** to 0, mark a test order with your
-own email as fulfilled, and check the order's Trustpilot tab, `swell logs --type function -s order-invitations` and
-Trustpilot Business → **Invitations**.
+To try it end to end, set real credentials in the test environment, turn on **Invite test orders**, set **Days to wait**
+to 0, mark a test order with your own email as fulfilled, and check the order's Trustpilot tab,
+`swell logs --type function -s order-invitations` and your invitations in Trustpilot Business.
 
 Workflows don't run under `swell app dev`; the actions always start the pushed version.
 

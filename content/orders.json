@@ -46,7 +46,7 @@
         {
           "id": "invite_selected",
           "label": "Send Trustpilot invitations",
-          "function": "invite-orders",
+          "function": "start-invitations",
           "loading_label": "Starting invitations…",
           "modal": {
             "title": "Send Trustpilot invitations",

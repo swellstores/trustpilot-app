@@ -6,6 +6,7 @@ import {
   inviteOrder,
   invitationStatus,
   missingSettings,
+  swellEnv,
   type TrustpilotSettings,
 } from './lib/trustpilot';
 
@@ -29,6 +30,7 @@ async function send(req: SwellRequest, settings: TrustpilotSettings, order: any,
       delayDays: 0,
       force,
       appId: req.appId,
+      env: swellEnv(req),
     });
 
     if (result.status === 'sent') {
@@ -40,12 +42,12 @@ async function send(req: SwellRequest, settings: TrustpilotSettings, order: any,
     if (result.status === 'unconfirmed') {
       fail(
         `Trustpilot didn't confirm the invitation (${result.reason}). It may have been created: ` +
-          'check Trustpilot Business → Invitations before sending again.',
+          'check your invitations in Trustpilot Business before sending again.',
       );
     }
     if (result.reason === 'already invited' && invitationStatus(order, req.appId).trustpilot_status === 'unconfirmed') {
       fail(
-        "Trustpilot didn't confirm the last invitation for this order. Check Trustpilot Business → Invitations, " +
+        "Trustpilot didn't confirm the last invitation for this order. Check your invitations in Trustpilot Business, " +
           'and tick "Send again" only if it isn\'t there.',
       );
     }

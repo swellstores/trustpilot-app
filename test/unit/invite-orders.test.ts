@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PAGE_SIZE } from "../../functions/lib/batch";
-import InviteOrders, { config, permanentMessage } from "../../functions/invite-orders";
+import InviteOrders, { config, permanentMessage, runInput } from "../../functions/invite-orders";
 import { TrustpilotError } from "../../functions/lib/trustpilot";
 import { inviteCalls, makeOrder, mockTrustpilot, rawSettings } from "../helpers/trustpilot-fixtures";
 
@@ -28,15 +28,17 @@ function makeStep() {
   return { step: step as unknown as SwellWorkflowStep, names };
 }
 
-function makeReq(pages: any[][], settings: any = rawSettings, data: any = {}) {
+// a run started by start-invitations: `data` is what the action passes; workflows only get the store id
+function makeReq(pages: any[][], settings: any = rawSettings, data: any = { env: null, store_url: "https://shop.example.com" }) {
   const get = vi.fn();
   pages.forEach((results) => get.mockResolvedValueOnce({ results }));
   get.mockResolvedValue({ results: [] });
   const put = vi.fn().mockResolvedValue({});
   const req = {
     appId: "trustpilot",
-    store: { id: "s", url: "https://shop.example.com" },
+    store: { id: "s" },
     data,
+    workflow: { trigger: "function" },
     swell: { get, put, settings: vi.fn().mockResolvedValue({ trustpilot: settings }) },
   } as unknown as SwellWorkflowRequest;
   return { req, get, put };
@@ -46,8 +48,38 @@ const ids = (n: number, prefix = "o") =>
   Array.from({ length: n }, (_, i) => makeOrder({ id: `${prefix}${String(i).padStart(3, "0")}` }));
 
 describe("invite-orders workflow", () => {
-  it("is a workflow started by actions", () => {
-    expect(config).toMatchObject({ kind: "workflow", action: true });
+  it("is a workflow started by the start-invitations action", () => {
+    expect(config).toMatchObject({ kind: "workflow" });
+    expect(config).not.toHaveProperty("action");
+  });
+
+  it("trusts its input only from a run a function started", () => {
+    const run = (trigger: string, data: any) => ({ data, workflow: { trigger } }) as unknown as SwellWorkflowRequest;
+    const data = { env: "test", store_url: "https://shop.example.com", query: { id: "x" }, since: "2026-09-01" };
+    expect(runInput(run("function", data))).toEqual({ env: "test", storeUrl: "https://shop.example.com", query: { id: "x" }, since: "2026-09-01" });
+    expect(runInput(run("function", { env: "Test" })).env).toBeNull();
+    expect(runInput(run("action", data))).toEqual({ env: null, storeUrl: "", query: undefined, since: undefined });
+  });
+
+  it("skips orders in the test environment unless Invite test orders is on", async () => {
+    let fetchMock = mockTrustpilot();
+    let { req } = makeReq([ids(2)], rawSettings, { env: "test", store_url: "https://shop.example.com" });
+    expect(await new InviteOrders().run(req, makeStep().step)).toEqual({ sent: 0, skipped: 2, failed: 0, unconfirmed: 0 });
+    expect(inviteCalls(fetchMock)).toHaveLength(0);
+
+    vi.restoreAllMocks();
+    fetchMock = mockTrustpilot();
+    ({ req } = makeReq([ids(2)], { ...rawSettings, invite_test_orders: true }, { env: "test", store_url: "https://shop.example.com" }));
+    expect(await new InviteOrders().run(req, makeStep().step)).toEqual({ sent: 2, skipped: 0, failed: 0, unconfirmed: 0 });
+    expect(inviteCalls(fetchMock)).toHaveLength(2);
+  });
+
+  it("links products to the storefront URL the action passed", async () => {
+    const fetchMock = mockTrustpilot();
+    const { req } = makeReq([ids(1)], { ...rawSettings, product_reviews: true });
+    await new InviteOrders().run(req, makeStep().step);
+    const [invite] = inviteCalls(fetchMock);
+    expect(invite.body.productReviewInvitation.products[0].productUrl).toMatch(/^https:\/\/shop\.example\.com\/products\//);
   });
 
   it("stops when the app is disabled", async () => {
@@ -78,10 +110,7 @@ describe("invite-orders workflow", () => {
   it("invites past orders since the modal date and pages through them", async () => {
     const fetchMock = mockTrustpilot();
     const full = ids(PAGE_SIZE);
-    const { req, get, put } = makeReq([full, ids(1, "z")], rawSettings, {
-      since: "2026-09-01",
-      $action: { id: "invite_past_orders", source: "settings", settings: "trustpilot", user_id: "u1" },
-    });
+    const { req, get, put } = makeReq([full, ids(1, "z")], rawSettings, { env: null, store_url: null, since: "2026-09-01" });
     const { step, names } = makeStep();
 
     const totals = await new InviteOrders().run(req, step);
@@ -100,10 +129,7 @@ describe("invite-orders workflow", () => {
 
   it("invites the orders selected in the list", async () => {
     mockTrustpilot();
-    const selection = { all: false, ids: ["o000"], count: 1, query: { $and: [{ id: { $in: ["o000"] } }] } };
-    const { req, get } = makeReq([ids(1)], rawSettings, {
-      $action: { id: "invite_selected", source: "bulk", collection: "orders", selection, user_id: "u1" },
-    });
+    const { req, get } = makeReq([ids(1)], rawSettings, { env: null, store_url: null, query: { $and: [{ id: { $in: ["o000"] } }] } });
     const { step } = makeStep();
 
     expect(await new InviteOrders().run(req, step)).toEqual({ sent: 1, skipped: 0, failed: 0, unconfirmed: 0 });
@@ -161,7 +187,7 @@ describe("invite-orders workflow", () => {
     await new InviteOrders().run(req, step);
 
     const outputs = await Promise.all((step.do as any).mock.results.map((r: any) => r.value));
-    expect(outputs[0]).toEqual({ enabled: true, missing: [], invite_on: "delivered" });
+    expect(outputs[0]).toEqual({ enabled: true, missing: [], invite_on: "delivered", started_at: expect.any(String) });
     const json = JSON.stringify(outputs);
     expect(json).not.toContain(rawSettings.api_key);
     expect(json).not.toContain(rawSettings.api_secret);

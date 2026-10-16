@@ -13,7 +13,7 @@
     {
       "id": "invite_past_orders",
       "label": "Invite past orders",
-      "function": "invite-orders",
+      "function": "start-invitations",
       "loading_label": "Starting invitations…",
       "hint": "Sends invitations for orders placed before the app was installed",
       "modal": {
@@ -138,6 +138,14 @@
               "description": "Empty: your default template. Test connection lists template IDs."
             }
           ]
+        },
+        {
+          "id": "invite_test_orders",
+          "label": "Invite test orders",
+          "type": "boolean",
+          "ui": "toggle",
+          "default": false,
+          "description": "Also send invitations for orders in Swell's test environment. They go to the customer's real email, so leave this off unless you're trying the app with your own address."
         },
         {
           "type": "field_row",

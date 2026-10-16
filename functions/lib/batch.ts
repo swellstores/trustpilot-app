@@ -1,4 +1,4 @@
-import { inviteOrder, type InviteContext, type InviteOn, type SwellClient } from './trustpilot';
+import { invitationStatus, inviteOrder, type InviteContext, type InviteOn, type SwellClient } from './trustpilot';
 
 // orders loaded per workflow step
 export const PAGE_SIZE = 50;
@@ -72,28 +72,37 @@ export async function fetchOrders(
   return page?.results || [];
 }
 
-// invite a page of orders; a rate limit is rethrown so the workflow retries the page
+// invite a page of orders; a rate limit is rethrown so the workflow retries the page. `runStartedAt` (ISO time) counts
+// orders this run already invited, before a retried page's error, as sent instead of skipped
 export async function invitePage(
   swell: SwellClient,
   orders: any[],
   ctx: InviteContext,
   appId?: string,
+  options: { env?: string | null; runStartedAt?: string } = {},
 ): Promise<BatchStats> {
   const stats = emptyStats();
   for (let i = 0; i < orders.length; i += CONCURRENCY) {
     const batch = orders.slice(i, i + CONCURRENCY);
     // past orders are sent right away, without the delay
     const results = await Promise.allSettled(
-      batch.map((order) => inviteOrder(swell, order, ctx, { delayDays: 0, appId })),
+      batch.map((order) => inviteOrder(swell, order, ctx, { delayDays: 0, appId, env: options.env })),
     );
-    for (const result of results) {
+    results.forEach((result, index) => {
       // inviteOrder records each result itself; what reaches here is a Trustpilot rate limit (nothing was created)
       // or an error before any invitation was sent, so retry the page: invited orders are skipped on the retry
       if (result.status === 'rejected') {
         throw result.reason;
       }
-      stats[result.value.status]++;
-    }
+      stats[sentThisRun(batch[index], result.value, appId, options.runStartedAt) ? 'sent' : result.value.status]++;
+    });
   }
   return stats;
+}
+
+// an order skipped as already invited that this run itself invited, before the page was retried
+function sentThisRun(order: any, result: { status: string; reason?: string }, appId?: string, runStartedAt?: string): boolean {
+  if (!runStartedAt || result.status !== 'skipped' || result.reason !== 'already invited') return false;
+  const saved = invitationStatus(order, appId);
+  return saved.trustpilot_status === 'sent' && typeof saved.trustpilot_sent_at === 'string' && saved.trustpilot_sent_at >= runStartedAt;
 }

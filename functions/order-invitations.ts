@@ -2,11 +2,14 @@ import {
   INVITE_EVENTS,
   alreadyInvited,
   createInviteContext,
+  environmentSkip,
   getOrder,
+  getSettings,
   handleError,
   inviteOrder,
-  loadSettings,
+  missingSettings,
   skipReason,
+  swellEnv,
 } from './lib/trustpilot';
 
 export const config: SwellConfig = {
@@ -20,15 +23,18 @@ export default async function (req: SwellRequest) {
   const { swell, data } = req;
   const eventType = data.$event?.type;
 
-  const settings = await loadSettings(swell);
-  if (!settings) {
+  // only the event chosen in "Send invitation when" sends invitations; filtered before checking the rest of the
+  // settings, so a missing setting is logged once per order, not once per order event
+  const settings = getSettings(await swell.settings());
+  if (!settings.enabled || !eventType || INVITE_EVENTS[eventType] !== settings.invite_on) {
     return;
   }
-
-  // only the event chosen in "Send invitation when" sends invitations
-  if (!eventType || INVITE_EVENTS[eventType] !== settings.invite_on) {
+  const missing = missingSettings(settings);
+  if (missing.length) {
+    console.error(`Trustpilot: missing ${missing.join(', ')} in app settings`);
     return;
   }
+  const env = swellEnv(req);
 
   const order = await getOrder(swell, data.id);
   if (!order) {
@@ -37,7 +43,8 @@ export default async function (req: SwellRequest) {
   }
 
   // checked before getting a token: an event delivered again, or an order that can't be invited, needs no Trustpilot call
-  const reason = skipReason(order) || (alreadyInvited(order, req.appId) ? 'already invited' : null);
+  const reason =
+    skipReason(order) || environmentSkip(settings, env) || (alreadyInvited(order, req.appId) ? 'already invited' : null);
   if (reason) {
     console.log(`Trustpilot: order ${order.number || order.id} skipped, ${reason}`);
     return;
@@ -48,6 +55,7 @@ export default async function (req: SwellRequest) {
     const result = await inviteOrder(swell, order, ctx, {
       delayDays: settings.delay_days,
       appId: req.appId,
+      env,
     });
     if (result.status === 'skipped') {
       console.log(`Trustpilot: order ${order.number || order.id} skipped, ${result.reason}`);

@@ -107,6 +107,18 @@ describe("invitePage", () => {
     expect(inviteCalls(fetchMock)[0].body.serviceReviewInvitation).not.toHaveProperty("preferredSendTime");
   });
 
+  it("counts orders this run invited before a retried page as sent, earlier ones as skipped", async () => {
+    const fetchMock = mockTrustpilot();
+    const invited = (id: string, at: string) =>
+      makeOrder({ id, $app: { trustpilot: { trustpilot_status: "sent", trustpilot_sent_at: at } } });
+    const orders = [invited("a", "2026-10-16T10:05:00.000Z"), invited("b", "2026-10-01T09:00:00.000Z"), makeOrder({ id: "c" })];
+
+    const stats = await invitePage(makeSwell(), orders, makeContext(), undefined, { runStartedAt: "2026-10-16T10:00:00.000Z" });
+
+    expect(stats).toEqual({ sent: 2, skipped: 1, failed: 0, unconfirmed: 0 });
+    expect(inviteCalls(fetchMock)).toHaveLength(1);
+  });
+
   it("rethrows a rate limit so the workflow retries the page", async () => {
     mockTrustpilot({ invite: { status: 429, body: { message: "slow down" } } });
     await expect(invitePage(makeSwell(), [makeOrder()], makeContext())).rejects.toThrow("Trustpilot 429");

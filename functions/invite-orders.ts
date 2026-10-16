@@ -1,11 +1,23 @@
 import { PAGE_SIZE, addStats, emptyStats, fetchOrders, invitePage, parseSince, pastOrdersQuery, type BatchStats } from './lib/batch';
 import { TrustpilotError, createInviteContext, detailOf, getSettings, missingSettings } from './lib/trustpilot';
 
+// started by the start-invitations action, which passes the environment, the storefront URL and the orders to invite
+// (workflows get no request headers and only the store id)
 export const config: SwellConfig = {
   kind: 'workflow',
   description: 'Send Trustpilot invitations for past or selected orders',
-  action: true,
 };
+
+// what start-invitations passed; only trusted from a run a function started
+export function runInput(req: SwellWorkflowRequest): { env: 'test' | null; storeUrl: string; query?: any; since?: unknown } {
+  const data = (req.workflow?.trigger === 'function' && req.data && typeof req.data === 'object' ? req.data : {}) as any;
+  return {
+    env: data.env === 'test' ? 'test' : null,
+    storeUrl: typeof data.store_url === 'string' ? data.store_url : '',
+    query: data.query && typeof data.query === 'object' ? data.query : undefined,
+    since: data.since,
+  };
+}
 
 interface PageResult extends BatchStats {
   count: number;
@@ -30,11 +42,17 @@ export function permanentMessage(err: TrustpilotError): string {
 
 export default class InviteOrders {
   async run(req: SwellWorkflowRequest, step: SwellWorkflowStep) {
-    const data = (req.data || {}) as any;
-    // step output is stored with the run, so keep only what the run needs here, never the API key or secret
+    const input = runInput(req);
+    // step output is stored with the run, so keep only what the run needs here, never the API key or secret;
+    // started_at is kept with it, so a retried page can tell orders this run invited from earlier ones
     const check = await step.do('load settings', async () => {
       const settings = getSettings(await req.swell.settings());
-      return { enabled: settings.enabled, missing: missingSettings(settings), invite_on: settings.invite_on };
+      return {
+        enabled: settings.enabled,
+        missing: missingSettings(settings),
+        invite_on: settings.invite_on,
+        started_at: new Date().toISOString(),
+      };
     });
 
     // throw so the run ends as failed instead of completed
@@ -48,10 +66,7 @@ export default class InviteOrders {
     }
 
     // orders selected in the list, or past orders since the date in the modal
-    const query =
-      data.$action?.source === 'bulk' && data.$action.selection?.query
-        ? data.$action.selection.query
-        : pastOrdersQuery(check.invite_on, parseSince(data.since));
+    const query = input.query || pastOrdersQuery(check.invite_on, parseSince(input.since));
 
     let totals = emptyStats();
     let lastId: string | null = null;
@@ -80,8 +95,8 @@ export default class InviteOrders {
           // step.do retries every thrown error, so permanent Trustpilot errors (bad credentials, wrong business unit)
           // are returned and fail the run right away; network errors, 429 and 5xx are thrown and retried
           try {
-            const ctx = await createInviteContext(settings, req.store?.url);
-            const stats = await invitePage(req.swell, orders, ctx, req.appId);
+            const ctx = await createInviteContext(settings, input.storeUrl);
+            const stats = await invitePage(req.swell, orders, ctx, req.appId, { env: input.env, runStartedAt: check.started_at });
             return { ...stats, count: orders.length, last_id: orders[orders.length - 1]?.id ?? null };
           } catch (err) {
             if (err instanceof TrustpilotError && !err.retryable) {

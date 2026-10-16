@@ -4,6 +4,7 @@ import { inviteCalls, makeOrder, makeSwell, mockTrustpilot, rawSettings } from "
 import orderInvitations, { config as orderConfig } from "../../functions/order-invitations";
 import testConnection, { config as testConfig } from "../../functions/test-connection";
 import sendInvitation, { config as sendConfig } from "../../functions/send-invitation";
+import startInvitations, { config as startConfig } from "../../functions/start-invitations";
 
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -16,9 +17,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function request(data: Record<string, any>, order: any = makeOrder(), settings: any = rawSettings, storeUrl = "") {
+function request(
+  data: Record<string, any>,
+  order: any = makeOrder(),
+  settings: any = rawSettings,
+  storeUrl = "",
+  headers?: Record<string, string>,
+) {
   const swell = makeSwell(order, settings);
-  const req = createMockRequest({ data, swell: swell as any, store: { url: storeUrl } as any, appId: "trustpilot" });
+  const req = createMockRequest({ data, swell: swell as any, store: { url: storeUrl } as any, appId: "trustpilot", headers });
   return { req, swell };
 }
 
@@ -86,6 +93,30 @@ describe("order-invitations", () => {
     expect(swell.get).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it("logs missing credentials once per order, for the configured event only", async () => {
+    mockTrustpilot();
+    for (const type of ["order.submitted", "order.paid", "order.delivered"]) {
+      await orderInvitations(request({ id: "ord_1", $event: { type } }, makeOrder(), { api_key: "k" }).req);
+    }
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith("Trustpilot: missing API secret, Business unit ID in app settings");
+  });
+
+  it("skips orders in the test environment unless Invite test orders is on", async () => {
+    let fetchMock = mockTrustpilot();
+    const test = { "Swell-Env": "test" };
+    let { req, swell } = request({ id: "ord_1", $event: { type: "order.delivered" } }, makeOrder(), rawSettings, "", test);
+    await orderInvitations(req);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(swell.put).not.toHaveBeenCalled();
+
+    vi.restoreAllMocks();
+    fetchMock = mockTrustpilot();
+    ({ req } = request({ id: "ord_1", $event: { type: "order.delivered" } }, makeOrder(), { ...rawSettings, invite_test_orders: true }, "", test));
+    await orderInvitations(req);
+    expect(inviteCalls(fetchMock)).toHaveLength(1);
   });
 
   it("logs when the order is not found", async () => {
@@ -160,6 +191,32 @@ describe("order-invitations", () => {
 async function expectFailure(result: Promise<unknown>, message: string) {
   await expect(result).rejects.toMatchObject({ name: "SwellError", status: 400, message });
 }
+
+describe("start-invitations", () => {
+  const start = async (data: any, headers?: Record<string, string>) => {
+    const { req, swell } = request(data, makeOrder(), rawSettings, "https://shop.example.com", headers);
+    const create = vi.fn().mockResolvedValue({ id: "wf_1", status: "active" });
+    (swell as any).workflows = { create };
+    const result = await startInvitations(req);
+    return { result, create };
+  };
+
+  it("starts past-order invitations with the date, environment and store URL", async () => {
+    expect(startConfig).toMatchObject({ action: true });
+    const { result, create } = await start(
+      { since: "2026-09-01", $action: { id: "invite_past_orders", source: "settings" } },
+      { "Swell-Env": "test" },
+    );
+    expect(result).toEqual({ message: "Invitations started. Follow them in the Workflows tab of the Trustpilot app." });
+    expect(create).toHaveBeenCalledWith("invite-orders", { env: "test", store_url: "https://shop.example.com", since: "2026-09-01" });
+  });
+
+  it("passes the orders selected in the list", async () => {
+    const query = { $and: [{ id: { $in: ["o000"] } }] };
+    const { create } = await start({ $action: { id: "invite_selected", source: "bulk", selection: { query } } });
+    expect(create).toHaveBeenCalledWith("invite-orders", { env: null, store_url: "https://shop.example.com", query });
+  });
+});
 
 describe("test-connection", () => {
   it("is a settings action", () => {
@@ -324,6 +381,15 @@ describe("send-invitation", () => {
     );
   });
 
+  it("refuses test environment orders unless Invite test orders is on", async () => {
+    const fetchMock = mockTrustpilot();
+    await expectFailure(
+      sendInvitation(request(action(), makeOrder(), rawSettings, "", { "Swell-Env": "test" }).req),
+      "Not sent: test environment order (Invite test orders is off).",
+    );
+    expect(inviteCalls(fetchMock)).toHaveLength(0);
+  });
+
   it("explains rejected credentials and outages", async () => {
     mockTrustpilot({ token: { status: 401, body: { message: "Unauthorized" } } });
     await expectFailure(
@@ -354,13 +420,13 @@ describe("send-invitation", () => {
     await expectFailure(
       sendInvitation(request(action()).req),
       "Trustpilot didn't confirm the invitation (Trustpilot 503: down). It may have been created: " +
-        "check Trustpilot Business → Invitations before sending again.",
+        "check your invitations in Trustpilot Business before sending again.",
     );
 
     const order = makeOrder({ $app: { trustpilot: { trustpilot_status: "unconfirmed" } } });
     await expectFailure(
       sendInvitation(request(action(), order).req),
-      "Trustpilot didn't confirm the last invitation for this order. Check Trustpilot Business → Invitations, " +
+      "Trustpilot didn't confirm the last invitation for this order. Check your invitations in Trustpilot Business, " +
         'and tick "Send again" only if it isn\'t there.',
     );
   });

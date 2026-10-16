@@ -20,6 +20,8 @@ import {
   skipReason,
   storeDomain,
   trustpilotRequest,
+  environmentSkip,
+  swellEnv,
 } from "../../functions/lib/trustpilot";
 import {
   callOf,
@@ -62,7 +64,25 @@ describe("getSettings", () => {
       product_reviews: false,
       product_template_id: "",
       product_url: "",
+      invite_test_orders: false,
     });
+  });
+
+  it("keeps the default delay when Days to wait is cleared", () => {
+    expect(getSettings({ trustpilot: { ...rawSettings, delay_days: null } }).delay_days).toBe(3);
+    expect(getSettings({ trustpilot: { ...rawSettings, delay_days: "" } }).delay_days).toBe(3);
+    expect(getSettings({ trustpilot: { ...rawSettings, delay_days: 0 } }).delay_days).toBe(0);
+    expect(getSettings({ trustpilot: { ...rawSettings, delay_days: "0" } }).delay_days).toBe(0);
+  });
+
+  it("reads the environment from Swell-Env and skips test orders unless allowed", () => {
+    expect(swellEnv({ headers: new Headers({ "Swell-Env": "test" }) })).toBe("test");
+    expect(swellEnv({ headers: new Headers({ "Swell-Env": "Test" }) })).toBeNull();
+    expect(swellEnv({ headers: new Headers() })).toBeNull();
+    expect(swellEnv({})).toBeNull();
+    expect(environmentSkip(makeSettings(), "test")).toBe("test environment order (Invite test orders is off)");
+    expect(environmentSkip(makeSettings({ invite_test_orders: true }), "test")).toBeNull();
+    expect(environmentSkip(makeSettings(), null)).toBeNull();
   });
 
   it("reads saved values and trims text", () => {
@@ -283,7 +303,8 @@ describe("buildInvitation", () => {
     const payload = buildInvitation(makeOrder(), ctx, 3, now);
     expect(payload.productReviewInvitation).toMatchObject({
       templateId: "tpl_product",
-      preferredSendTime: "2026-10-04T10:00:00.000Z",
+      // a minute after the service invitation, which Trustpilot requires to come first
+      preferredSendTime: "2026-10-04T10:01:00.000Z",
       products: [{ sku: "SKU-V", name: "Trail Shirt" }],
     });
   });
@@ -402,7 +423,7 @@ describe("inviteOrder", () => {
     const values = swell.put.mock.calls[0][1].$app.trustpilot;
     expect(values.trustpilot_status).toBe("unconfirmed");
     expect(values.trustpilot_error).toBe(
-      `${reason}. Trustpilot may have created the invitation: check Trustpilot Business → Invitations before sending again.`,
+      `${reason}. Trustpilot may have created the invitation: check your invitations in Trustpilot Business before sending again.`,
     );
   });
 

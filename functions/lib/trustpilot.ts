@@ -34,6 +34,8 @@ export interface TrustpilotSettings {
   product_reviews: boolean;
   product_template_id: string;
   product_url: string;
+  // send invitations for orders in Swell's test environment too (off: they're skipped)
+  invite_test_orders: boolean;
 }
 
 // Error returned by the Trustpilot API (or a network failure when status is 0)
@@ -75,7 +77,8 @@ export function getSettings(all: any): TrustpilotSettings {
   const flag = (value: unknown, fallback: boolean) => (typeof value === 'boolean' ? value : fallback);
   const text = (value: unknown, fallback = '') =>
     typeof value === 'string' && value.trim() ? value.trim() : fallback;
-  const delay = Number(raw.delay_days);
+  // a cleared field is saved as null or "" and keeps the default, it isn't 0 (send right away)
+  const delay = raw.delay_days === null || raw.delay_days === '' ? NaN : Number(raw.delay_days);
 
   return {
     api_key: text(raw.api_key),
@@ -93,6 +96,7 @@ export function getSettings(all: any): TrustpilotSettings {
     product_reviews: flag(raw.product_reviews, false),
     product_template_id: text(raw.product_template_id),
     product_url: text(raw.product_url),
+    invite_test_orders: flag(raw.invite_test_orders, false),
   };
 }
 
@@ -131,6 +135,17 @@ export async function loadSettings(swell: SwellClient): Promise<TrustpilotSettin
     return null;
   }
   return settings;
+}
+
+// "test" when a function runs in the test environment (its Swell-Env header is exactly "test"), otherwise null
+export function swellEnv(req: { headers?: Headers }): 'test' | null {
+  return req.headers?.get('swell-env') === 'test' ? 'test' : null;
+}
+
+// why orders of this environment aren't invited, or null: test orders reach real customer emails, so they're skipped
+// unless "Invite test orders" is on
+export function environmentSkip(settings: TrustpilotSettings, env: string | null | undefined): string | null {
+  return env === 'test' && !settings.invite_test_orders ? 'test environment order (Invite test orders is off)' : null;
 }
 
 // call the Trustpilot API; returns parsed JSON or null for empty responses
@@ -322,10 +337,16 @@ export function sendTime(delayDays: number, now = new Date()): string | undefine
   return new Date(now.getTime() + delayDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
+// the product invitation's send time: Trustpilot requires the service invitation to come first when both have one
+export const PRODUCT_AFTER_SERVICE_MS = 60 * 1000;
+
 // Trustpilot email invitation payload for a Swell order
 export function buildInvitation(order: any, ctx: InviteContext, delayDays: number, now = new Date()): any {
   const { settings } = ctx;
   const preferredSendTime = sendTime(delayDays, now);
+  const productSendTime = preferredSendTime
+    ? new Date(Date.parse(preferredSendTime) + PRODUCT_AFTER_SERVICE_MS).toISOString()
+    : undefined;
 
   const payload: any = compact({
     consumerEmail: order.account?.email,
@@ -349,7 +370,7 @@ export function buildInvitation(order: any, ctx: InviteContext, delayDays: numbe
     if (products.length) {
       payload.productReviewInvitation = compact({
         templateId: ctx.productTemplateId,
-        preferredSendTime,
+        preferredSendTime: productSendTime,
         redirectUri: settings.redirect_uri,
         products,
       });
@@ -402,9 +423,9 @@ export async function inviteOrder(
   swell: SwellClient,
   order: any,
   ctx: InviteContext,
-  options: { delayDays: number; force?: boolean; appId?: string },
+  options: { delayDays: number; force?: boolean; appId?: string; env?: string | null },
 ): Promise<InviteResult> {
-  const reason = skipReason(order);
+  const reason = skipReason(order) || environmentSkip(ctx.settings, options.env);
   if (reason) {
     return { status: 'skipped', reason };
   }
@@ -434,7 +455,7 @@ export async function inviteOrder(
     // after a network error, timeout or 5xx Trustpilot may already have created the invitation:
     // record it as unconfirmed and don't retry, so the customer isn't emailed twice
     if (err instanceof TrustpilotError && err.retryable) {
-      const note = `${message}. Trustpilot may have created the invitation: check Trustpilot Business → Invitations before sending again.`;
+      const note = `${message}. Trustpilot may have created the invitation: check your invitations in Trustpilot Business before sending again.`;
       await recordResult(swell, order, { trustpilot_status: 'unconfirmed', trustpilot_error: note }, options.appId);
       console.error(`Trustpilot: invitation for order ${order.number || order.id} not confirmed, not retried: ${detailOf(err)}`);
       return { status: 'unconfirmed', reason: message };
