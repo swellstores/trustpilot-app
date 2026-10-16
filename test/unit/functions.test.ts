@@ -156,6 +156,11 @@ describe("order-invitations", () => {
   });
 });
 
+// failures are thrown as a 400 so the admin shows them as a red error popup
+async function expectFailure(result: Promise<unknown>, message: string) {
+  await expect(result).rejects.toMatchObject({ name: "SwellError", status: 400, message });
+}
+
 describe("test-connection", () => {
   it("is a settings action", () => {
     expect(testConfig).toMatchObject({ action: true });
@@ -164,9 +169,7 @@ describe("test-connection", () => {
   it("asks for credentials when missing", async () => {
     const fetchMock = mockTrustpilot();
     const { req } = request({}, null, {});
-    expect(await testConnection(req)).toEqual({
-      message: "Add your Trustpilot API key and secret and save the settings first.",
-    });
+    await expectFailure(testConnection(req), "Add your Trustpilot API key and secret and save the settings first.");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -193,7 +196,8 @@ describe("test-connection", () => {
   it("explains when no business unit matches the domain", async () => {
     mockTrustpilot({ find: { status: 404, body: { message: "Not found" } } });
     const { req } = request({}, null, { api_key: "k", api_secret: "s" }, "https://alder.co");
-    expect((await testConnection(req)).message).toBe(
+    await expectFailure(
+      testConnection(req),
       "No Trustpilot business unit found for alder.co. Enter your Business unit ID, then save the settings.",
     );
   });
@@ -201,13 +205,14 @@ describe("test-connection", () => {
   it("asks for the business unit ID without a store URL", async () => {
     mockTrustpilot();
     const { req } = request({}, null, { api_key: "k", api_secret: "s" });
-    expect((await testConnection(req)).message).toBe("Enter your Business unit ID, then save the settings.");
+    await expectFailure(testConnection(req), "Enter your Business unit ID, then save the settings.");
   });
 
   it("explains rejected credentials", async () => {
     mockTrustpilot({ token: { status: 401, body: { message: "Unauthorized" } } });
     const { req } = request({}, null);
-    expect((await testConnection(req)).message).toBe(
+    await expectFailure(
+      testConnection(req),
       "Trustpilot rejected the API key or secret. Check them in Trustpilot Business → Integrations → Developers → APIs, " +
         "and that your Trustpilot plan includes the API module (not available on the free plan).",
     );
@@ -216,27 +221,27 @@ describe("test-connection", () => {
   it("explains an unknown business unit", async () => {
     mockTrustpilot({ unit: { status: 404, body: { message: "Not found" } } });
     const { req } = request({}, null);
-    expect((await testConnection(req)).message).toBe("Business unit bu_1 was not found in Trustpilot. Check the ID.");
+    await expectFailure(testConnection(req), "Business unit bu_1 was not found in Trustpilot. Check the ID.");
   });
 
   it("reports other failures, with try again only for temporary ones", async () => {
     mockTrustpilot({ unit: { status: 500, body: { message: "boom" } } });
-    expect((await testConnection(request({}, null).req)).message).toBe(
+    await expectFailure(
+      testConnection(request({}, null).req),
       "Trustpilot request failed, try again later: Trustpilot 500: boom",
     );
 
     vi.restoreAllMocks();
     mockTrustpilot({ templates: { status: 400, body: { message: "bad request" } } });
-    expect((await testConnection(request({}, null).req)).message).toBe(
+    await expectFailure(
+      testConnection(request({}, null).req),
       "Trustpilot request failed: Trustpilot 400: bad request",
     );
   });
 
   it("doesn't report a 404 from the templates as an unknown business unit", async () => {
     mockTrustpilot({ templates: { status: 404, body: { message: "Not found" } } });
-    expect((await testConnection(request({}, null).req)).message).toBe(
-      "Trustpilot request failed: Trustpilot 404: Not found",
-    );
+    await expectFailure(testConnection(request({}, null).req), "Trustpilot request failed: Trustpilot 404: Not found");
   });
 
   it("works while the app is disabled, and says it's off", async () => {
@@ -270,12 +275,14 @@ describe("send-invitation", () => {
 
   it("refuses when the app is disabled or not set up", async () => {
     const fetchMock = mockTrustpilot();
-    expect(await sendInvitation(request(action(), makeOrder(), { ...rawSettings, enabled: false }).req)).toEqual({
-      message: "The Trustpilot app is turned off in its settings.",
-    });
-    expect(await sendInvitation(request(action(), makeOrder(), { api_key: "k" }).req)).toEqual({
-      message: "Add the API secret, Business unit ID in Apps → Trustpilot first.",
-    });
+    await expectFailure(
+      sendInvitation(request(action(), makeOrder(), { ...rawSettings, enabled: false }).req),
+      "The Trustpilot app is turned off in its settings.",
+    );
+    await expectFailure(
+      sendInvitation(request(action(), makeOrder(), { api_key: "k" }).req),
+      "Add the API secret, Business unit ID in Apps → Trustpilot first.",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -289,9 +296,10 @@ describe("send-invitation", () => {
     const order = makeOrder({
       $app: { trustpilot: { trustpilot_status: "sent", trustpilot_sent_at: "2026-10-02T09:00:00.000Z" } },
     });
-    expect(await sendInvitation(request(action(), order).req)).toEqual({
-      message: 'This order was already invited on 2026-10-02. Tick "Send again" to send another invitation.',
-    });
+    await expectFailure(
+      sendInvitation(request(action(), order).req),
+      'This order was already invited on 2026-10-02. Tick "Send again" to send another invitation.',
+    );
     expect(inviteCalls(fetchMock)).toHaveLength(0);
   });
 
@@ -306,17 +314,20 @@ describe("send-invitation", () => {
 
   it("explains skipped and rejected orders", async () => {
     mockTrustpilot({ invite: { status: 400, body: { message: "Invalid email" } } });
-    expect(await sendInvitation(request(action(), makeOrder({ canceled: true })).req)).toEqual({
-      message: "Not sent: order is canceled.",
-    });
-    expect(await sendInvitation(request(action()).req)).toEqual({
-      message: "Trustpilot did not accept the invitation: Trustpilot 400: Invalid email",
-    });
+    await expectFailure(
+      sendInvitation(request(action(), makeOrder({ canceled: true })).req),
+      "Not sent: order is canceled.",
+    );
+    await expectFailure(
+      sendInvitation(request(action()).req),
+      "Trustpilot did not accept the invitation: Trustpilot 400: Invalid email",
+    );
   });
 
   it("explains rejected credentials and outages", async () => {
     mockTrustpilot({ token: { status: 401, body: { message: "Unauthorized" } } });
-    expect((await sendInvitation(request(action()).req)).message).toBe(
+    await expectFailure(
+      sendInvitation(request(action()).req),
       "Trustpilot rejected the API key or secret, or your plan doesn't include the API module. " +
         "Run Test connection in Apps → Trustpilot.",
     );
@@ -324,27 +335,31 @@ describe("send-invitation", () => {
     vi.restoreAllMocks();
     vi.spyOn(console, "log").mockImplementation(() => {});
     mockTrustpilot({ token: { status: 503, body: { message: "down" } } });
-    expect((await sendInvitation(request(action()).req)).message).toBe(
+    await expectFailure(
+      sendInvitation(request(action()).req),
       "Trustpilot request failed, try again later: Trustpilot 503: down",
     );
 
     vi.restoreAllMocks();
     vi.spyOn(console, "log").mockImplementation(() => {});
     mockTrustpilot({ token: { status: 400, body: { message: "invalid_request" } } });
-    expect((await sendInvitation(request(action()).req)).message).toBe(
+    await expectFailure(
+      sendInvitation(request(action()).req),
       "Trustpilot request failed: Trustpilot 400: invalid_request",
     );
   });
 
   it("explains an invitation Trustpilot didn't confirm", async () => {
     mockTrustpilot({ invite: { status: 503, body: { message: "down" } } });
-    expect((await sendInvitation(request(action()).req)).message).toBe(
+    await expectFailure(
+      sendInvitation(request(action()).req),
       "Trustpilot didn't confirm the invitation (Trustpilot 503: down). It may have been created: " +
         "check Trustpilot Business → Invitations before sending again.",
     );
 
     const order = makeOrder({ $app: { trustpilot: { trustpilot_status: "unconfirmed" } } });
-    expect((await sendInvitation(request(action(), order).req)).message).toBe(
+    await expectFailure(
+      sendInvitation(request(action(), order).req),
       "Trustpilot didn't confirm the last invitation for this order. Check Trustpilot Business → Invitations, " +
         'and tick "Send again" only if it isn\'t there.',
     );

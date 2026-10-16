@@ -113,8 +113,12 @@ the service review invitation is sent. Product reviews must be part of the merch
 - without one: looks up the business unit by the store's domain (`GET /v1/business-units/find?name=<domain>`) and shows its ID.
 - with **Enabled** off it still runs, and adds that no invitations are sent until the app is turned on.
 
+Problems (missing API key or secret, rejected credentials, unknown or missing business unit, failed requests) are thrown
+as a `SwellError` with status 400, so the admin shows them in a red error popup; results are returned as a regular message.
 Only a 404 from the business unit lookup is reported as an unknown ID. Other errors are shown with Trustpilot's message, with
-"try again later" only for temporary ones (network error, HTTP 429 or 5xx). **Send Trustpilot invitation** words its errors the same way.
+"try again later" only for temporary ones (network error, HTTP 429 or 5xx). **Send Trustpilot invitation** words its errors the same way,
+and also shows every outcome other than "Invitation sent" (app off, settings missing, already invited, skipped, refused,
+unconfirmed) as a red error popup.
 
 ### Turning the app off
 
