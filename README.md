@@ -283,3 +283,7 @@ to 0, mark a test order with your own email as fulfilled, and check the order's 
 Workflows don't run under `swell app dev`; the actions always start the pushed version.
 
 Logs are also available in the dashboard under **Developer → Console → Logs**.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
